@@ -6,7 +6,7 @@ server:
       cookie:
         name: ECOLOOP_SESSION
         http-only: true
-        same-site: lax
+        same-site: ${COOKIE_SAME_SITE:none}
         # TLS is mandatory by default. Set false only for an explicitly local HTTP environment.
         secure: ${COOKIE_SECURE:true}
 spring:

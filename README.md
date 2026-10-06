@@ -30,8 +30,13 @@ The response should be reachable even though protected API endpoints still requi
 - `REDIS_URL`
 - `SERVER_ADDRESS` (default `0.0.0.0`)
 - `PORT`
+- `COOKIE_SECURE` (default `true`; keep enabled for HTTPS deployments)
+- `COOKIE_SAME_SITE` (default `none` for a separately hosted HTTPS frontend; use `lax` only when frontend and API are same-site)
+- `CORS_ALLOWED_ORIGINS` (comma-separated exact frontend origins, including scheme and port when applicable; for example `https://admin.example.com`)
 
 No bearer-token configuration is required. Session expiry defaults to seven days and login rotates the session ID to prevent fixation.
+
+The admin web frontend calls the API cross-origin with session cookies. Cross-site session cookies require HTTPS, `COOKIE_SECURE=true`, and `COOKIE_SAME_SITE=none`. Add the frontend's exact origin to `CORS_ALLOWED_ORIGINS` in the backend deployment environment; do not include a path or trailing slash. After changing backend environment values, redeploy the service. In browser developer tools, confirm `/api/auth/login` succeeds, the `ECOLOOP_SESSION` cookie is accepted, and the following `/api/auth/me` request sends that cookie and returns role `ADMIN`.
 
 ## Uploaded file storage
 
