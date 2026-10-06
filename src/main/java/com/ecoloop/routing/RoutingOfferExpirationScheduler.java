@@ -47,13 +47,11 @@ public class RoutingOfferExpirationScheduler {
         long startedAtMs = System.currentTimeMillis();
         AtomicInteger totalExpired = new AtomicInteger(0);
         try {
-            final int[] pageHolder = new int[]{0};
             while (true) {
-                final int currentPage = pageHolder[0];
                 Integer expiredInBatch = transactionTemplate.execute(status -> {
                     Instant cutoff = Instant.now();
                     Slice<RoutingOffer> slice = offers.findExpiredOffersSliced(
-                        cutoff, PageRequest.of(currentPage, batchSize));
+                        cutoff, PageRequest.of(0, batchSize));
                     List<UUID> ids = slice.getContent().stream()
                         .map(RoutingOffer::getId)
                         .toList();
@@ -71,7 +69,6 @@ public class RoutingOfferExpirationScheduler {
                 if (expiredInBatch < batchSize) {
                     break;
                 }
-                pageHolder[0]++;
             }
             long durationMs = System.currentTimeMillis() - startedAtMs;
             if (totalExpired.get() > 0) {
@@ -88,8 +85,4 @@ public class RoutingOfferExpirationScheduler {
         }
     }
 
-    int runNow() {
-        runExpirationCleanup();
-        return 0;
-    }
 }
