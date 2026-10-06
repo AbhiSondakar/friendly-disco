@@ -65,9 +65,8 @@ class BackendWorkflowTests {
   @Transactional
   void serviceEnforceExpireTransitionsStatusAndThrows() {
     assertNotNull(routingService, "RoutingService must be reachable from Spring context");
-    RoutingOffer stale = new RoutingOffer(UUID.randomUUID(), UUID.randomUUID(),
-        Instant.now().minusSeconds(30));
-    stale = routingOfferRepository.save(stale);
+    RoutingOffer stale = routingOfferRepository.save(new RoutingOffer(UUID.randomUUID(), UUID.randomUUID(),
+        Instant.now().minusSeconds(30)));
     routingOfferRepository.flush();
     assertEquals("offered", stale.getStatus());
 

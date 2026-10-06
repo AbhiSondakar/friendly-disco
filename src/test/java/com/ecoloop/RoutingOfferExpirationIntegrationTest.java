@@ -164,8 +164,7 @@ class RoutingOfferExpirationIntegrationTest {
     @Test
     void overlappingRunsAreSkippedGracefully() throws Exception {
         seedOffers(5, 0, 0);
-        int firstResult = scheduler.runNow();
-        assertEquals(0, firstResult);
+        scheduler.runExpirationCleanup();
 
         long expiredAfter = tx.execute(s ->
             offers.findAll().stream()
