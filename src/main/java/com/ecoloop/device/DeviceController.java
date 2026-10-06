@@ -14,7 +14,6 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.math.BigDecimal;
-import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -53,10 +52,10 @@ public class DeviceController {
         String mime = stored.metadata().getContentType();
         String imageUrl = stored.publicUri();
 
-        return createDevice(userId, stored.absolutePath(), mime, condition, imageUrl);
+        return createDevice(userId, stored.content(), mime, condition, imageUrl);
     }
 
-    private Device createDevice(UUID userId, Path imagePath, String mime, String condition, String imageUrl) {
+    private Device createDevice(UUID userId, byte[] image, String mime, String condition, String imageUrl) {
         Device device = new Device();
         device.setId(UUID.randomUUID());
         device.setUserId(userId);
@@ -67,7 +66,7 @@ public class DeviceController {
         device.setAiStatus("pending");
         device = devices.save(device);
 
-        ClassificationResult result = classificationApi.classify(imagePath, mime, device.getId(), imageUrl);
+        ClassificationResult result = classificationApi.classify(image, mime, device.getId(), imageUrl);
         device.setCategory(result.category());
         device.setAiCategory(result.category());
         device.setAiConfidence(BigDecimal.valueOf(result.confidence()));

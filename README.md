@@ -32,3 +32,11 @@ The response should be reachable even though protected API endpoints still requi
 - `PORT`
 
 No bearer-token configuration is required. Session expiry defaults to seven days and login rotates the session ID to prevent fixation.
+
+## Uploaded file storage
+
+New device photos, partner licenses, and pickup evidence are stored in PostgreSQL: upload details are kept in `uploads` and the file bytes are kept in the related `upload_contents` table. Flyway migration `V6` creates this table. New uploads no longer depend on the service's local filesystem or a Render persistent disk, and downloads remain protected by the existing session and ownership/partner authorization checks.
+
+Existing uploads created before this change still use their recorded filesystem path when their file is present. A database migration cannot restore file bytes that were already lost when an ephemeral host restarted or redeployed; those historical image links will continue to return not found.
+
+Database-backed files make PostgreSQL larger and increase backup and restore time. Include the database in regular backups and monitor its storage as uploads grow. Each upload remains limited to 5 MB.

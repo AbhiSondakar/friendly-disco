@@ -108,7 +108,7 @@ public class PickupService {
         String imageUrl = stored.publicUri();
         UUID deviceId = UUID.randomUUID();
 
-        ClassificationResult result = classificationApi.classify(stored.absolutePath(), mime, deviceId, imageUrl);
+        ClassificationResult result = classificationApi.classify(stored.content(), mime, deviceId, imageUrl);
 
         return transactionTemplate.execute(status -> {
             Device device = new Device();

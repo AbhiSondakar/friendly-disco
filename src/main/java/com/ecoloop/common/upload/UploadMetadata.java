@@ -17,7 +17,7 @@ public class UploadMetadata {
     @Column(nullable = false, length = 50)
     private String purpose;
 
-    @Column(name = "storage_path", nullable = false, length = 1024)
+    @Column(name = "storage_path", length = 1024)
     private String storagePath;
 
     @Column(name = "original_filename", length = 255)

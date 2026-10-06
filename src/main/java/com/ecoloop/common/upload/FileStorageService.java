@@ -1,8 +1,7 @@
 package com.ecoloop.common.upload;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
@@ -15,13 +14,12 @@ import org.springframework.web.multipart.MultipartFile;
 import javax.imageio.ImageIO;
 import javax.imageio.ImageReader;
 import javax.imageio.stream.ImageInputStream;
-import java.io.BufferedInputStream;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
@@ -31,21 +29,21 @@ import java.util.UUID;
 @Service
 public class FileStorageService {
 
-    private static final Logger log = LoggerFactory.getLogger(FileStorageService.class);
     private static final long MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
-    private static final int HEADER_PEEK_BYTES = 16;
 
     private final Path rootDir;
     private final UploadMetadataRepository uploadRepository;
+    private final UploadContentRepository contentRepository;
 
     public FileStorageService(@Value("${ecoloop.upload.dir:uploads}") String uploadDir,
-                              UploadMetadataRepository uploadRepository) throws IOException {
+                              UploadMetadataRepository uploadRepository,
+                              UploadContentRepository contentRepository) {
         this.rootDir = Paths.get(uploadDir).toAbsolutePath().normalize();
         this.uploadRepository = uploadRepository;
-        Files.createDirectories(this.rootDir);
+        this.contentRepository = contentRepository;
     }
 
-    public record StoredFile(UploadMetadata metadata, Path absolutePath, String publicUri) {}
+    public record StoredFile(UploadMetadata metadata, byte[] content, String publicUri) {}
 
     @Transactional
     public StoredFile storeFile(UUID userId, String purpose, MultipartFile file, boolean allowPdf) throws IOException {
@@ -56,93 +54,66 @@ public class FileStorageService {
             throw new IllegalArgumentException("File size exceeds 5MB limit");
         }
 
+        byte[] content = file.getBytes();
+        if (content.length > MAX_FILE_SIZE) {
+            throw new IllegalArgumentException("File size exceeds 5MB limit");
+        }
+
+        ValidatedType type = detectTypeFromHeader(content, allowPdf);
+        if (!"pdf".equals(type.extension())) {
+            validateImageDimensions(
+                content,
+                "png".equals(type.extension()) ? "PNG" : "JPEG"
+            );
+        }
+
         MessageDigest digest;
         try {
             digest = MessageDigest.getInstance("SHA-256");
         } catch (NoSuchAlgorithmException e) {
             throw new IOException("SHA-256 digest unavailable", e);
         }
-
-        Path subDir = rootDir.resolve(purpose).normalize();
-        if (!subDir.startsWith(rootDir)) {
-            throw new IllegalArgumentException("Invalid storage directory path");
-        }
-        Files.createDirectories(subDir);
-
-        ValidatedType type;
-        Path targetPath;
-        String filename;
-        long bytesCopied;
-
-        try (InputStream rawIn = file.getInputStream();
-             BufferedInputStream buffered = new BufferedInputStream(rawIn)) {
-
-            buffered.mark(HEADER_PEEK_BYTES + 1);
-            byte[] header = buffered.readNBytes(HEADER_PEEK_BYTES);
-            buffered.reset();
-
-            type = detectTypeFromHeader(header, allowPdf);
-
-            filename = UUID.randomUUID() + "." + type.extension();
-            targetPath = subDir.resolve(filename).normalize();
-            if (!targetPath.startsWith(rootDir)) {
-                throw new IllegalArgumentException("Invalid file destination path");
-            }
-
-            DigestInputStream digestIn = new DigestInputStream(buffered, digest);
-            try {
-                bytesCopied = Files.copy(digestIn, targetPath);
-            } catch (IOException e) {
-                log.error("Failed to write uploaded file to disk: {}", e.getMessage());
-                throw e;
-            }
-        }
-
-        String checksum = HexFormat.of().formatHex(digest.digest());
-
-        if (bytesCopied > MAX_FILE_SIZE) {
-            Files.deleteIfExists(targetPath);
-            throw new IllegalArgumentException("File size exceeds 5MB limit");
-        }
-
-        if (!"pdf".equals(type.extension())) {
-            try {
-                validateImageDimensions(targetPath, "png".equals(type.extension()) ? "PNG" : "JPEG");
-            } catch (RuntimeException e) {
-                Files.deleteIfExists(targetPath);
-                throw e;
-            }
-        }
+        String checksum = HexFormat.of().formatHex(digest.digest(content));
+        String filename = UUID.randomUUID() + "." + type.extension();
 
         UploadMetadata metadata = new UploadMetadata(
             userId,
             purpose,
-            targetPath.toString(),
+            null,
             file.getOriginalFilename() != null ? file.getOriginalFilename() : filename,
             type.mimeType(),
-            bytesCopied,
+            content.length,
             checksum
         );
 
-        try {
-            metadata = uploadRepository.save(metadata);
-        } catch (Exception e) {
-            try {
-                Files.deleteIfExists(targetPath);
-            } catch (IOException ex) {
-                log.warn("Failed to clean up newly written file after database save failure: {}", ex.getMessage());
-            }
-            throw e;
-        }
+        metadata = uploadRepository.save(metadata);
+        contentRepository.save(new UploadContent(metadata.getId(), content));
 
         String publicUri = "/api/uploads/" + metadata.getId();
-        return new StoredFile(metadata, targetPath, publicUri);
+        return new StoredFile(metadata, content, publicUri);
     }
 
     public ResponseEntity<Resource> serveUpload(UploadMetadata metadata) throws IOException {
-        Path filePath = Paths.get(metadata.getStoragePath()).toAbsolutePath().normalize();
-        if (!filePath.startsWith(rootDir) || !Files.exists(filePath)) {
-            throw new NoSuchElementException("File not found on storage");
+        Resource resource;
+        long lastModified;
+        byte[] content = contentRepository.findById(metadata.getId())
+            .map(UploadContent::getContent)
+            .orElse(null);
+
+        if (content != null) {
+            resource = new ByteArrayResource(content);
+            lastModified = metadata.getCreatedAt().toEpochMilli();
+        } else {
+            String storagePath = metadata.getStoragePath();
+            if (storagePath == null || storagePath.isBlank()) {
+                throw new NoSuchElementException("File content not found");
+            }
+            Path filePath = Paths.get(storagePath).toAbsolutePath().normalize();
+            if (!filePath.startsWith(rootDir) || !Files.isRegularFile(filePath)) {
+                throw new NoSuchElementException("File not found on storage");
+            }
+            resource = new FileSystemResource(filePath.toFile());
+            lastModified = Files.getLastModifiedTime(filePath).toMillis();
         }
 
         MediaType mediaType;
@@ -156,8 +127,8 @@ public class FileStorageService {
             .header(HttpHeaders.CONTENT_TYPE, mediaType.toString())
             .header("X-Content-Type-Options", "nosniff")
             .header(HttpHeaders.CACHE_CONTROL, "private, max-age=31536000, immutable")
-            .lastModified(Files.getLastModifiedTime(filePath).toMillis())
-            .body(new FileSystemResource(filePath.toFile()));
+            .lastModified(lastModified)
+            .body(resource);
     }
 
     public Path getRootDir() {
@@ -190,8 +161,8 @@ public class FileStorageService {
             : "Image format not supported. Only valid JPEG and PNG images are permitted.");
     }
 
-    private void validateImageDimensions(Path imagePath, String formatName) {
-        try (InputStream in = Files.newInputStream(imagePath);
+    private void validateImageDimensions(byte[] content, String formatName) {
+        try (InputStream in = new ByteArrayInputStream(content);
              ImageInputStream iis = ImageIO.createImageInputStream(in)) {
             if (iis == null) {
                 throw new IllegalArgumentException("Unable to open " + formatName + " image stream");
