@@ -1,0 +1,24 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8090}:8090"
+    environment:
+      # These will be automatically injected from your .env file on the host
+      SPRING_DATASOURCE_URL: ${DATABASE_URL}
+      SPRING_DATASOURCE_USERNAME: ${DATABASE_USERNAME}
+      SPRING_DATASOURCE_PASSWORD: ${DATABASE_PASSWORD}
+      REDIS_URL: ${REDIS_URL}
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      ROBOFLOW_API_KEY: ${ROBOFLOW_API_KEY}
+      ROBOFLOW_WORKFLOW: ${ROBOFLOW_WORKFLOW}
+    volumes:
+      - ecoloop-uploads:/app/uploads
+
+volumes:
+  ecoloop-uploads:

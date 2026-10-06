@@ -1,0 +1,91 @@
+server:
+  address: ${SERVER_ADDRESS:0.0.0.0}
+  port: ${PORT:8090}
+  servlet:
+    session:
+      cookie:
+        name: ECOLOOP_SESSION
+        http-only: true
+        same-site: lax
+        # TLS is mandatory by default. Set false only for an explicitly local HTTP environment.
+        secure: ${COOKIE_SECURE:true}
+spring:
+  threads:
+    virtual:
+      enabled: true
+  application:
+    name: ecoloop
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/ecoloop}
+    username: ${DATABASE_USERNAME}
+    password: ${DATABASE_PASSWORD}
+    hikari:
+      maximum-pool-size: ${DB_POOL_MAX:15}
+      minimum-idle: ${DB_POOL_MIN:5}
+      connection-timeout: 20000
+      idle-timeout: 300000
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  session:
+    store-type: redis
+    timeout: 7d
+    redis:
+      namespace: ecoloop:session
+  data:
+    redis:
+      url: ${REDIS_URL:redis://localhost:6379}
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 5MB
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when-authorized
+ecoloop:
+  ai:
+    provider: ${ECOLOOP_AI_PROVIDER:stub}
+    max-concurrent-classifications: ${ECOLOOP_MAX_CONCURRENT_CLASSIFICATIONS:1}
+  upload:
+    dir: ${ECOLOOP_UPLOAD_DIR:uploads/devices}
+  security:
+    # Empty by default: forwarded headers are ignored unless the direct peer is listed here.
+    trusted-proxies: ${TRUSTED_PROXY_IPS:}
+    seed-admin:
+      enabled: ${SEED_ADMIN_ENABLED:false}
+      email: ${ADMIN_EMAIL:}
+      password: ${ADMIN_PASSWORD:}
+  routing:
+    offer-expiration:
+      enabled: ${ECOLOOP_OFFER_EXPIRATION_ENABLED:true}
+      interval-ms: ${ECOLOOP_OFFER_EXPIRATION_INTERVAL_MS:3600000}
+      batch-size: ${ECOLOOP_OFFER_EXPIRATION_BATCH_SIZE:500}
+ai:
+  roboflow:
+    api-key: ${ROBOFLOW_API_KEY:}
+    workflow: ${ROBOFLOW_WORKFLOW:abhishek-sondakar-k3rfj/e-waste-qmxtt-zuyip-1-yolo26n-t1}
+    max-attempts: ${ROBOFLOW_MAX_ATTEMPTS:2}
+    retry-backoff-ms: ${ROBOFLOW_RETRY_BACKOFF_MS:200}
+    circuit-breaker:
+      failure-threshold: ${ROBOFLOW_CIRCUIT_FAILURE_THRESHOLD:5}
+      cooldown-ms: ${ROBOFLOW_CIRCUIT_COOLDOWN_MS:30000}
+
+cors:
+  allowed-origins: ${CORS_ORIGINS:http://localhost:3000,http://localhost:5173,http://localhost:8081}
+
+logging:
+  level:
+    root: INFO
+    com.ecoloop: ${APP_LOG_LEVEL:INFO}

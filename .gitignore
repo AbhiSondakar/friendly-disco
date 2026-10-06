@@ -1,0 +1,17 @@
+# v0 sandbox metadata
+.vercel/
+.v0-trash/
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Java / Maven
+.target/
+target/
+*.class
+*.log
+
+# OS files
+.DS_Store
