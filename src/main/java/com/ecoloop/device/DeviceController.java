@@ -84,7 +84,7 @@ public class DeviceController {
         device.setAiCategory(result.category());
         device.setAiConfidence(BigDecimal.valueOf(result.confidence()));
         device.setAiProvider(result.provider());
-        device.setAiStatus(result.status() != null ? result.status() : "completed");
+        device.setAiStatus(result.deviceAiStatus());
         device.setUpdatedAt(Instant.now());
         
         Device saved = devices.save(device);

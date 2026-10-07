@@ -18,4 +18,11 @@ public record ClassificationResult(
     public boolean requiresManualReview() {
         return "manual_review".equalsIgnoreCase(status);
     }
+
+    public String deviceAiStatus() {
+        if (requiresManualReview()) {
+            return "manual";
+        }
+        return status == null || status.isBlank() ? "completed" : status;
+    }
 }

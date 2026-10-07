@@ -136,7 +136,7 @@ public class PickupService {
             device.setAiCategory(result.category());
             device.setAiConfidence(BigDecimal.valueOf(result.confidence()));
             device.setAiProvider(result.provider());
-            device.setAiStatus(result.status() != null ? result.status() : "completed");
+            device.setAiStatus(result.deviceAiStatus());
             device = devices.save(device);
 
             PickupRequest pickup = new PickupRequest(userId, device.getId(), address != null ? address.trim() : "");
