@@ -110,6 +110,20 @@ public class PickupService {
 
         ClassificationResult result = classificationApi.classify(stored.content(), mime, deviceId, imageUrl);
 
+        if ("failed".equals(result.status())) {
+            throw new ResponseStatusException(
+                HttpStatus.SERVICE_UNAVAILABLE, 
+                "AI classification failed due to a backend issue. Please try again later."
+            );
+        }
+
+        if (result.confidence() == 0.0) {
+            throw new ResponseStatusException(
+                HttpStatus.UNPROCESSABLE_ENTITY, 
+                "AI model could not classify the image. Please provide a clearer picture."
+            );
+        }
+
         return transactionTemplate.execute(status -> {
             Device device = new Device();
             device.setId(deviceId);

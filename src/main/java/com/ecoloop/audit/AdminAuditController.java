@@ -58,6 +58,7 @@ public class AdminAuditController {
         this.redisConnectionFactoryProvider = redisConnectionFactoryProvider;
     }
 
+    @PreAuthorize("hasRole('ADMIN')")
     @GetMapping("/api/admin/audit")
     public PageResponse<AuditLog> listAudit(@RequestParam(defaultValue = "0") int page,
                                             @RequestParam(defaultValue = "100") int size,
@@ -68,6 +69,7 @@ public class AdminAuditController {
         return PageResponse.of(audit.findAll(spec, PageRequest.of(boundedPage, boundedSize, Sort.by(Sort.Direction.DESC, "createdAt"))));
     }
 
+    @PreAuthorize("hasRole('ADMIN')")
     @GetMapping(value = "/api/admin/audit/export", produces = "text/csv")
     public ResponseEntity<String> exportAuditCsv(@RequestParam(defaultValue = "1000") int limit,
                                                  @RequestParam(required = false) String search) {
@@ -102,6 +104,7 @@ public class AdminAuditController {
         return s;
     }
 
+    @PreAuthorize("hasRole('ADMIN')")
     @GetMapping("/api/admin/health")
     public Map<String, Object> health() {
         long uptimeMs = ManagementFactory.getRuntimeMXBean().getUptime();

@@ -29,6 +29,7 @@ public class AdminPickupController {
     this.pickupService = pickupService;
   }
 
+  @PreAuthorize("hasRole('ADMIN')")
   @GetMapping
   public PageResponse<PickupWithDevice> list(@RequestParam(defaultValue = "0") int page,
                                              @RequestParam(defaultValue = "20") int size,
@@ -47,6 +48,7 @@ public class AdminPickupController {
 
   public record ReassignRequest(UUID partnerId) {}
 
+  @PreAuthorize("hasRole('ADMIN')")
   @PostMapping("/{id}/reassign")
   public PickupWithDevice reassign(@PathVariable UUID id,
                                 @RequestBody(required = false) ReassignRequest body) {

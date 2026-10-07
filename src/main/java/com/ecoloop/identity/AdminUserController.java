@@ -30,6 +30,7 @@ public class AdminUserController {
         this.sessionRevocationService = sessionRevocationService;
     }
 
+    @PreAuthorize("hasRole('ADMIN')")
     @GetMapping
     public PageResponse<IdentityService.UserDto> list(
             @RequestParam(defaultValue = "0") int page,
@@ -60,16 +61,19 @@ public class AdminUserController {
         return PageResponse.of(users.findAll(spec, pageable)).mapContent(identity::toDto);
     }
 
+    @PreAuthorize("hasRole('ADMIN')")
     @PostMapping("/{id}/deactivate")
     public IdentityService.UserDto deactivate(@PathVariable UUID id) {
         return change(id, false);
     }
 
+    @PreAuthorize("hasRole('ADMIN')")
     @PostMapping("/{id}/activate")
     public IdentityService.UserDto activate(@PathVariable UUID id) {
         return change(id, true);
     }
 
+    @PreAuthorize("hasRole('ADMIN')")
     @PatchMapping("/{id}/role")
     public IdentityService.UserDto changeRole(@PathVariable UUID id, @RequestBody RoleUpdate body) {
         var user = users.findById(id).orElseThrow(() ->

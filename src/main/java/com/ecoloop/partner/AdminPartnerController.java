@@ -25,6 +25,7 @@ public class AdminPartnerController {
         this.lifecycleService = lifecycleService;
     }
 
+    @PreAuthorize("hasRole('ADMIN')")
     @GetMapping
     public PageResponse<PartnerDto> list(@RequestParam(defaultValue = "0") int page,
                                          @RequestParam(defaultValue = "20") int size,
@@ -40,6 +41,7 @@ public class AdminPartnerController {
         return PageResponse.of(dtoPage);
     }
 
+    @PreAuthorize("hasRole('ADMIN')")
     @GetMapping("/{id}")
     public PartnerDto get(@PathVariable UUID id) {
         return partners.findById(id)
@@ -47,16 +49,19 @@ public class AdminPartnerController {
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Partner not found"));
     }
 
+    @PreAuthorize("hasRole('ADMIN')")
     @PostMapping("/{id}/approve")
     public PartnerDto approve(@PathVariable UUID id) {
         return PartnerDto.from(lifecycleService.approve(id), true);
     }
 
+    @PreAuthorize("hasRole('ADMIN')")
     @PostMapping("/{id}/reject")
     public PartnerDto reject(@PathVariable UUID id) {
         return PartnerDto.from(lifecycleService.reject(id), true);
     }
 
+    @PreAuthorize("hasRole('ADMIN')")
     @PostMapping("/{id}/suspend")
     public PartnerDto suspend(@PathVariable UUID id) {
         return PartnerDto.from(lifecycleService.suspend(id), true);

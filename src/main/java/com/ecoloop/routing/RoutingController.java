@@ -5,6 +5,7 @@ import com.ecoloop.pickup.PickupService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
@@ -24,21 +25,25 @@ public class RoutingController {
         this.pickupService = pickupService;
     }
 
+    @PreAuthorize("hasRole('PARTNER')")
     @GetMapping("/offers")
     public List<RoutingOffer> offers(HttpServletRequest r) {
         return offers.findAllByPartnerIdOrderByCreatedAtDesc(partnerId(r));
     }
 
+    @PreAuthorize("hasRole('PARTNER')")
     @PostMapping("/offers/{id}/accept")
     public RoutingOffer accept(@PathVariable UUID id, HttpServletRequest r) {
         return routingService.acceptOffer(partnerUserId(r), id);
     }
 
+    @PreAuthorize("hasRole('PARTNER')")
     @PostMapping("/offers/{id}/reject")
     public RoutingOffer reject(@PathVariable UUID id, HttpServletRequest r) {
         return routingService.rejectOffer(partnerUserId(r), id);
     }
 
+    @PreAuthorize("hasRole('PARTNER')")
     @PostMapping("/offers/{id}/complete")
     public Object complete(@PathVariable UUID id, HttpServletRequest r) {
         UUID partnerUserId = partnerUserId(r);

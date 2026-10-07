@@ -56,23 +56,37 @@ public class DeviceController {
     }
 
     private Device createDevice(UUID userId, byte[] image, String mime, String condition, String imageUrl) {
+        UUID deviceId = UUID.randomUUID();
+
+        ClassificationResult result = classificationApi.classify(image, mime, deviceId, imageUrl);
+
+        if ("failed".equals(result.status())) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE, 
+                "AI classification failed due to a backend issue. Please try again later."
+            );
+        }
+
+        if (result.confidence() == 0.0) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.UNPROCESSABLE_ENTITY, 
+                "AI model could not classify the image. Please provide a clearer picture."
+            );
+        }
+
         Device device = new Device();
-        device.setId(UUID.randomUUID());
+        device.setId(deviceId);
         device.setUserId(userId);
         device.setCondition(condition != null ? condition.trim() : "good");
         device.setImageUrl(imageUrl);
         device.setCreatedAt(Instant.now());
-        device.setUpdatedAt(Instant.now());
-        device.setAiStatus("pending");
-        device = devices.save(device);
-
-        ClassificationResult result = classificationApi.classify(image, mime, device.getId(), imageUrl);
         device.setCategory(result.category());
         device.setAiCategory(result.category());
         device.setAiConfidence(BigDecimal.valueOf(result.confidence()));
         device.setAiProvider(result.provider());
         device.setAiStatus(result.status() != null ? result.status() : "completed");
         device.setUpdatedAt(Instant.now());
+        
         Device saved = devices.save(device);
         log.info("Device created and classified: id={} user={} category={} confidence={}",
                 saved.getId(), userId, result.category(), result.confidence());

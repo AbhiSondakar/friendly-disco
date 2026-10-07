@@ -61,6 +61,7 @@ public class AdminOverviewController {
         List<RecentActivityItem> recentActivity
     ) {}
 
+    @PreAuthorize("hasRole('ADMIN')")
     @GetMapping
     public OverviewResponse overview() {
         long totalUsers = users.count();
