@@ -75,7 +75,7 @@ ecoloop:
 ai:
   roboflow:
     api-key: ${ROBOFLOW_API_KEY:}
-    workflow: ${ROBOFLOW_WORKFLOW:abhishek-sondakar-k3rfj/e-waste-qmxtt-zuyip-1-yolo26n-t1}
+    model-id: ${ROBOFLOW_MODEL_ID:e-waste-qmxtt-zuyip/1}
     max-attempts: ${ROBOFLOW_MAX_ATTEMPTS:2}
     retry-backoff-ms: ${ROBOFLOW_RETRY_BACKOFF_MS:200}
     circuit-breaker:

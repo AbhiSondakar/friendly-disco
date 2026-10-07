@@ -14,4 +14,8 @@ public record ClassificationResult(
     public boolean isSuccessful() {
         return "completed".equalsIgnoreCase(status);
     }
+
+    public boolean requiresManualReview() {
+        return "manual_review".equalsIgnoreCase(status);
+    }
 }

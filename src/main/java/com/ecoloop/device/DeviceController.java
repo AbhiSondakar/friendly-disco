@@ -67,7 +67,7 @@ public class DeviceController {
             );
         }
 
-        if (result.confidence() == 0.0) {
+        if (result.confidence() == 0.0 && !result.requiresManualReview()) {
             throw new org.springframework.web.server.ResponseStatusException(
                 org.springframework.http.HttpStatus.UNPROCESSABLE_ENTITY, 
                 "AI model could not classify the image. Please provide a clearer picture."

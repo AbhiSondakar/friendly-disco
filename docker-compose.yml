@@ -16,7 +16,7 @@ services:
       ADMIN_EMAIL: ${ADMIN_EMAIL}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       ROBOFLOW_API_KEY: ${ROBOFLOW_API_KEY}
-      ROBOFLOW_WORKFLOW: ${ROBOFLOW_WORKFLOW}
+      ROBOFLOW_MODEL_ID: ${ROBOFLOW_MODEL_ID:-e-waste-qmxtt-zuyip/1}
     volumes:
       - ecoloop-uploads:/app/uploads
 

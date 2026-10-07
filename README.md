@@ -33,6 +33,9 @@ The response should be reachable even though protected API endpoints still requi
 - `COOKIE_SECURE` (default `true`; keep enabled for HTTPS deployments)
 - `COOKIE_SAME_SITE` (default `none` for a separately hosted HTTPS frontend; use `lax` only when frontend and API are same-site)
 - `CORS_ALLOWED_ORIGINS` (comma-separated exact frontend origins, including scheme and port when applicable; for example `https://admin.example.com`)
+- `ROBOFLOW_API_KEY` and `ROBOFLOW_MODEL_ID` (default model ID `e-waste-qmxtt-zuyip/1`; device image inference uses Roboflow's model endpoint)
+
+Images with no usable model prediction are saved as `other` with status `manual_review`; inference failures are still rejected.
 
 No bearer-token configuration is required. Session expiry defaults to seven days and login rotates the session ID to prevent fixation.
 

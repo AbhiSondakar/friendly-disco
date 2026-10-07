@@ -25,10 +25,11 @@ public class RoboflowVisionProvider implements VisionProvider {
     private static final Logger log = LoggerFactory.getLogger(RoboflowVisionProvider.class);
     private static final Set<String> CANONICAL = Set.of("laptop", "phone", "tablet", "battery", "appliance", "other");
     private static final double CONFIDENCE_FLOOR = 0.2;
+    private static final double ROBOFLOW_CONFIDENCE_THRESHOLD = 0.4;
 
     private final RestClient restClient;
     private final String apiKey;
-    private final String workflow;
+    private final String modelId;
     private final ObjectProvider<MeterRegistry> meterRegistryProvider;
     private final AtomicInteger consecutiveFailures = new AtomicInteger(0);
     private final AtomicLong circuitOpenUntilMillis = new AtomicLong(0);
@@ -47,11 +48,11 @@ public class RoboflowVisionProvider implements VisionProvider {
 
     public RoboflowVisionProvider(@Qualifier("roboflowRestClient") RestClient restClient,
                                   @Value("${ai.roboflow.api-key:}") String apiKey,
-                                  @Value("${ai.roboflow.workflow:}") String workflow,
+                                  @Value("${ai.roboflow.model-id:}") String modelId,
                                   ObjectProvider<MeterRegistry> meterRegistryProvider) {
         this.restClient = restClient;
         this.apiKey = apiKey;
-        this.workflow = workflow;
+        this.modelId = modelId;
         this.meterRegistryProvider = meterRegistryProvider;
     }
 
@@ -62,7 +63,7 @@ public class RoboflowVisionProvider implements VisionProvider {
 
     @Override
     public boolean isConfigured() {
-        return apiKey != null && !apiKey.isBlank() && workflow != null && !workflow.isBlank();
+        return apiKey != null && !apiKey.isBlank() && modelId != null && !modelId.isBlank();
     }
 
     @Override
@@ -74,26 +75,18 @@ public class RoboflowVisionProvider implements VisionProvider {
         }
 
         long start = System.currentTimeMillis();
-
         String base64Image = Base64.getEncoder().encodeToString(image);
-        Map<String, Object> requestBody = Map.of(
-            "inputs", Map.of(
-                "image", Map.of(
-                    "type", "base64",
-                    "value", base64Image
-                )
-            )
-        );
-
-        String path = "/" + workflow;
 
         int attempts = Math.max(1, maxAttempts);
         for (int attempt = 1; attempt <= attempts; attempt++) {
             try {
                 ResponseEntity<Map> entity = restClient.post()
-                    .uri(path)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(requestBody)
+                    .uri(uriBuilder -> uriBuilder
+                        .path("/" + modelId)
+                        .queryParam("confidence", ROBOFLOW_CONFIDENCE_THRESHOLD)
+                        .build())
+                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                    .body(base64Image)
                     .retrieve()
                     .toEntity(Map.class);
 
@@ -101,7 +94,7 @@ public class RoboflowVisionProvider implements VisionProvider {
                 Map<String, Object> response = entity.getBody();
 
                 if (response == null) {
-                    log.warn("Roboflow returned a null response for the configured workflow");
+                    log.warn("Roboflow returned a null response for the configured model");
                     recordFailure();
                     recordMetric("ecoloop.ai.classification.failures");
                     return failedResult();
@@ -109,10 +102,10 @@ public class RoboflowVisionProvider implements VisionProvider {
 
                 Prediction top = topPrediction(response);
                 if (top == null || top.clazz == null) {
-                    log.warn("Roboflow returned no usable predictions for the configured workflow");
+                    log.warn("Roboflow returned no usable predictions for the configured model");
                     recordSuccess();
                     recordMetric("ecoloop.ai.classification.empty");
-                    return new ClassificationResult("other", 0.0, "roboflow", workflow, "manual_review");
+                    return new ClassificationResult("other", 0.0, "roboflow", modelId, "manual_review");
                 }
 
                 String category = mapLabel(top.clazz);
@@ -125,11 +118,11 @@ public class RoboflowVisionProvider implements VisionProvider {
                 recordSuccess();
                 if ("other".equals(category) || confidence < CONFIDENCE_FLOOR) {
                     recordMetric("ecoloop.ai.classification.low_confidence");
-                    return new ClassificationResult("other", confidence, "roboflow", workflow, "manual_review");
+                    return new ClassificationResult("other", confidence, "roboflow", modelId, "manual_review");
                 }
 
                 recordMetric("ecoloop.ai.classification.success");
-                return new ClassificationResult(category, confidence, "roboflow", workflow, "completed");
+                return new ClassificationResult(category, confidence, "roboflow", modelId, "completed");
             } catch (Exception e) {
                 if (isRetryable(e) && attempt < attempts) {
                     log.warn("Roboflow classification attempt {} of {} failed: exception={}",
@@ -154,7 +147,7 @@ public class RoboflowVisionProvider implements VisionProvider {
     }
 
     private ClassificationResult failedResult() {
-        return new ClassificationResult("other", 0.0, "roboflow", workflow, "failed");
+        return new ClassificationResult("other", 0.0, "roboflow", modelId, "failed");
     }
 
     private boolean isRetryable(Exception exception) {

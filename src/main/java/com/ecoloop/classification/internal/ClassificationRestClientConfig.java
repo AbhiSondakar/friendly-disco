@@ -25,8 +25,7 @@ public class ClassificationRestClientConfig {
     RestClient roboflowRestClient() {
         RestClient.Builder builder = RestClient.builder()
             .baseUrl("https://serverless.roboflow.com")
-            .requestFactory(createRequestFactory())
-            .defaultHeader("Content-Type", "application/json");
+            .requestFactory(createRequestFactory());
         if (roboflowApiKey != null && !roboflowApiKey.isBlank()) {
             builder.defaultHeader("Authorization", "Bearer " + roboflowApiKey);
         }

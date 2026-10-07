@@ -22,7 +22,9 @@ class RoboflowVisionProviderTest {
 
     @BeforeEach
     void setUp() {
-        restClientBuilder = RestClient.builder().baseUrl("https://serverless.roboflow.com");
+        restClientBuilder = RestClient.builder()
+            .baseUrl("https://serverless.roboflow.com")
+            .defaultHeader("Authorization", "Bearer test-api-key");
         mockServer = MockRestServiceServer.bindTo(restClientBuilder).build();
         RestClient restClient = restClientBuilder.build();
 
@@ -33,26 +35,24 @@ class RoboflowVisionProviderTest {
             @Override public Object getIfUnique() { return null; }
         };
 
-        provider = new RoboflowVisionProvider(restClient, "test-api-key", "test-workflow", providerMock);
+        provider = new RoboflowVisionProvider(restClient, "test-api-key", "e-waste-qmxtt-zuyip/1", providerMock);
     }
 
     @Test
     void testSuccessfulClassification() {
         String jsonResponse = """
             {
-              "outputs": [
-                {
-                  "predictions": [
-                    { "class": "laptop computer", "confidence": 0.94 }
-                  ]
-                }
+              "predictions": [
+                { "class": "laptop computer", "confidence": 0.94 }
               ]
             }
             """;
 
-        mockServer.expect(requestTo("https://serverless.roboflow.com/test-workflow"))
+        mockServer.expect(requestTo("https://serverless.roboflow.com/e-waste-qmxtt-zuyip/1?confidence=0.4"))
             .andExpect(method(HttpMethod.POST))
-            .andExpect(header("Content-Type", MediaType.APPLICATION_JSON_VALUE))
+            .andExpect(header("Authorization", "Bearer test-api-key"))
+            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_FORM_URLENCODED))
+            .andExpect(content().string("/9j/AA=="))
             .andRespond(withSuccess(jsonResponse, MediaType.APPLICATION_JSON));
 
         byte[] fakeImage = new byte[] { (byte)0xFF, (byte)0xD8, (byte)0xFF, 0x00 };
@@ -69,17 +69,13 @@ class RoboflowVisionProviderTest {
     void testLowConfidenceTriggersManualReview() {
         String jsonResponse = """
             {
-              "outputs": [
-                {
-                  "predictions": [
-                    { "class": "phone", "confidence": 0.15 }
-                  ]
-                }
+              "predictions": [
+                { "class": "phone", "confidence": 0.15 }
               ]
             }
             """;
 
-        mockServer.expect(requestTo("https://serverless.roboflow.com/test-workflow"))
+        mockServer.expect(requestTo("https://serverless.roboflow.com/e-waste-qmxtt-zuyip/1?confidence=0.4"))
             .andExpect(method(HttpMethod.POST))
             .andRespond(withSuccess(jsonResponse, MediaType.APPLICATION_JSON));
 
@@ -93,11 +89,27 @@ class RoboflowVisionProviderTest {
     }
 
     @Test
+    void testEmptyPredictionsTriggersManualReview() {
+        mockServer.expect(requestTo("https://serverless.roboflow.com/e-waste-qmxtt-zuyip/1?confidence=0.4"))
+            .andExpect(method(HttpMethod.POST))
+            .andRespond(withSuccess("{\"predictions\":[]}", MediaType.APPLICATION_JSON));
+
+        byte[] fakeImage = new byte[] { (byte)0xFF, (byte)0xD8, (byte)0xFF, 0x00 };
+        ClassificationResult result = provider.classify(fakeImage, "image/jpeg");
+
+        mockServer.verify();
+        assertEquals("other", result.category());
+        assertEquals(0.0, result.confidence());
+        assertEquals("manual_review", result.status());
+        assertFalse(result.isSuccessful());
+    }
+
+    @Test
     void testServerErrorTriggersFailedState() {
-        mockServer.expect(requestTo("https://serverless.roboflow.com/test-workflow"))
+        mockServer.expect(requestTo("https://serverless.roboflow.com/e-waste-qmxtt-zuyip/1?confidence=0.4"))
             .andExpect(method(HttpMethod.POST))
             .andRespond(withServerError());
-        mockServer.expect(requestTo("https://serverless.roboflow.com/test-workflow"))
+        mockServer.expect(requestTo("https://serverless.roboflow.com/e-waste-qmxtt-zuyip/1?confidence=0.4"))
             .andExpect(method(HttpMethod.POST))
             .andRespond(withServerError());
 

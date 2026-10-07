@@ -117,7 +117,7 @@ public class PickupService {
             );
         }
 
-        if (result.confidence() == 0.0) {
+        if (result.confidence() == 0.0 && !result.requiresManualReview()) {
             throw new ResponseStatusException(
                 HttpStatus.UNPROCESSABLE_ENTITY, 
                 "AI model could not classify the image. Please provide a clearer picture."
