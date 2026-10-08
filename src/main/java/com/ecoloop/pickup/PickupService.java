@@ -162,7 +162,7 @@ public class PickupService {
             log.info("Atomic household pickup created: pickupId={} deviceId={} category={}",
                     pickup.getId(), device.getId(), result.category());
 
-            return PickupWithDevice.from(pickup, device);
+            return PickupWithDevice.from(pickup, device, null);
         });
     }
 
@@ -347,11 +347,15 @@ public class PickupService {
     }
 
     public PickupWithDevice enrich(PickupRequest pickup) {
-        if (pickup.getDeviceId() == null) {
-            return PickupWithDevice.from(pickup, null);
+        Device device = null;
+        if (pickup.getDeviceId() != null) {
+            device = devices.findById(pickup.getDeviceId()).orElse(null);
         }
-        Device device = devices.findById(pickup.getDeviceId()).orElse(null);
-        return PickupWithDevice.from(pickup, device);
+        Partner partner = null;
+        if (pickup.getPartnerId() != null) {
+            partner = partners.findById(pickup.getPartnerId()).orElse(null);
+        }
+        return PickupWithDevice.from(pickup, device, partner);
     }
 
     public List<PickupWithDevice> enrich(List<PickupRequest> pickupList) {
