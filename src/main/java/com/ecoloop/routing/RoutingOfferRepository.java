@@ -31,4 +31,20 @@ public interface RoutingOfferRepository extends JpaRepository<RoutingOffer, UUID
     @Modifying
     @Query("UPDATE RoutingOffer o SET o.status = 'expired' WHERE o.id IN :ids AND o.status = 'offered'")
     int markAsExpiredInBatch(@Param("ids") Collection<UUID> ids);
+
+    @Query("SELECT COALESCE(MAX(o.round), 0) FROM RoutingOffer o WHERE o.pickupId = :pickupId")
+    int findMaxRoundByPickupId(@Param("pickupId") UUID pickupId);
+
+    @Query("SELECT COUNT(o) FROM RoutingOffer o WHERE o.pickupId = :pickupId AND o.status = 'offered' AND (o.expiresAt IS NULL OR o.expiresAt > :now)")
+    long countActiveOffersByPickupId(@Param("pickupId") UUID pickupId, @Param("now") Instant now);
+
+    @Query("SELECT p.userId FROM RoutingOffer o JOIN Partner p ON p.id = o.partnerId WHERE o.pickupId = :pickupId AND o.status = 'offered'")
+    List<UUID> findOfferedPartnerUserIdsByPickupId(@Param("pickupId") UUID pickupId);
+
+    /** Partners whose open offers were cancelled with the pickup (AFTER_COMMIT cancel fan-out). */
+    @Query("SELECT p.userId FROM RoutingOffer o JOIN Partner p ON p.id = o.partnerId WHERE o.pickupId = :pickupId AND o.status = 'cancelled'")
+    List<UUID> findCancelledOfferPartnerUserIdsByPickupId(@Param("pickupId") UUID pickupId);
+
+    @Query("SELECT p.userId FROM RoutingOffer o JOIN Partner p ON p.id = o.partnerId WHERE o.pickupId = :pickupId AND o.status = 'superseded' AND o.partnerId <> :acceptedPartnerId")
+    List<UUID> findSupersededPartnerUserIdsByPickupId(@Param("pickupId") UUID pickupId, @Param("acceptedPartnerId") UUID acceptedPartnerId);
 }

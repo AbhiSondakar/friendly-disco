@@ -1,12 +1,18 @@
 package com.ecoloop.pickup;
 
+import com.ecoloop.common.security.ActorContext;
+import com.ecoloop.routing.RoutingOffer;
 import jakarta.persistence.*;
+import org.springframework.data.domain.AbstractAggregateRoot;
+import org.springframework.security.access.AccessDeniedException;
+
 import java.time.Instant;
+import java.util.Set;
 import java.util.UUID;
 
 @Entity
 @Table(name = "pickup_requests")
-public class PickupRequest {
+public class PickupRequest extends AbstractAggregateRoot<PickupRequest> {
 
     @Id
     private UUID id = UUID.randomUUID();
@@ -96,6 +102,156 @@ public class PickupRequest {
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
+
+    public PickupRequest registerCreatedEvent() {
+        registerEvent(new PickupCreatedEvent(this.id));
+        return this;
+    }
+
+    public java.util.Collection<Object> getDomainEvents() {
+        return domainEvents();
+    }
+
+    public PickupRequest acceptBy(ActorContext actor, RoutingOffer offer) {
+        if (actor == null || !actor.isPartner()) {
+            throw new AccessDeniedException("Only approved partners can accept pickups");
+        }
+        if (offer == null) {
+            throw new AccessDeniedException("Offer is required to accept pickup");
+        }
+        if (!this.id.equals(offer.getPickupId())) {
+            throw new IllegalStateException("Offer is not for this pickup");
+        }
+        if (actor.partnerId() != null && !actor.partnerId().equals(offer.getPartnerId())) {
+            throw new AccessDeniedException("Offer does not belong to this partner");
+        }
+        if (!"pending".equals(this.status)) {
+            throw new IllegalStateException("Pickup is no longer pending (current: " + this.status + ")");
+        }
+
+        this.partnerId = offer.getPartnerId();
+        this.status = "accepted";
+        this.updatedAt = Instant.now();
+        registerEvent(new PickupAcceptedEvent(this.id, this.partnerId));
+        return this;
+    }
+
+    public PickupRequest cancelBy(ActorContext actor) {
+        if (actor == null || (!actor.isHousehold() && !actor.isAdmin())) {
+            throw new AccessDeniedException("Only households can cancel their pickups");
+        }
+        if (!actor.isAdmin() && !actor.userId().equals(this.userId)) {
+            throw new AccessDeniedException("Pickup does not belong to this user");
+        }
+        if (!Set.of("pending", "accepted").contains(this.status)) {
+            throw new IllegalStateException("Invalid pickup state transition");
+        }
+
+        this.status = "cancelled";
+        this.updatedAt = Instant.now();
+        registerEvent(new PickupCancelledEvent(this.id));
+        return this;
+    }
+
+    public PickupRequest rejectBy(ActorContext actor, String reason) {
+        if (actor == null || !actor.isPartner()) {
+            throw new AccessDeniedException("Only assigned partner can reject pickup");
+        }
+        if (actor.partnerId() == null || !actor.partnerId().equals(this.partnerId)) {
+            throw new AccessDeniedException("Pickup is not assigned to this partner");
+        }
+        if (!"accepted".equals(this.status)) {
+            throw new IllegalStateException("Invalid pickup state transition");
+        }
+
+        UUID prevPartner = this.partnerId;
+        this.partnerId = null;
+        this.status = "pending";
+        this.updatedAt = Instant.now();
+        registerEvent(new PickupRejectedEvent(this.id, prevPartner));
+        registerEvent(new PickupCreatedEvent(this.id));
+        return this;
+    }
+
+    public PickupRequest verifyBy(ActorContext actor, VerifyRequest request) {
+        if (actor == null || !actor.isPartner()) {
+            throw new AccessDeniedException("Only assigned partner can verify pickup");
+        }
+        if (actor.partnerId() == null || !actor.partnerId().equals(this.partnerId)) {
+            throw new AccessDeniedException("Pickup is not assigned to this partner");
+        }
+        if (!"accepted".equals(this.status)) {
+            throw new IllegalStateException("Pickup must be accepted before verification");
+        }
+
+        this.verify(
+            request != null ? request.category() : null,
+            request != null ? request.condition() : null,
+            request != null ? request.notes() : null,
+            request != null ? request.evidenceUrl() : null,
+            actor.partnerId()
+        );
+        registerEvent(new PickupVerifiedEvent(this.id, this.partnerId));
+        return this;
+    }
+
+    public PickupRequest completeBy(ActorContext actor) {
+        if (actor == null || !actor.isPartner()) {
+            throw new AccessDeniedException("Only assigned partner can complete pickup");
+        }
+        if (actor.partnerId() == null || !actor.partnerId().equals(this.partnerId)) {
+            throw new AccessDeniedException("Pickup is not assigned to this partner");
+        }
+        if ("completed".equals(this.status)) {
+            return this;
+        }
+        if (!Set.of("accepted", "verified").contains(this.status)) {
+            throw new IllegalStateException("Pickup cannot be completed from status: " + this.status);
+        }
+
+        this.status = "completed";
+        this.completedAt = Instant.now();
+        this.updatedAt = Instant.now();
+        registerEvent(new PickupCompletedEvent(this.id, this.partnerId));
+        return this;
+    }
+
+    public PickupRequest reassignBy(ActorContext actor, UUID newPartnerId) {
+        if (actor == null || !actor.isAdmin()) {
+            throw new AccessDeniedException("Only admins can reassign pickups");
+        }
+        if (newPartnerId == null) {
+            throw new IllegalArgumentException("newPartnerId is required");
+        }
+        if (Set.of("completed", "cancelled").contains(this.status)) {
+            throw new IllegalStateException("Cannot reassign completed or cancelled pickup");
+        }
+
+        UUID previousPartnerId = this.partnerId;
+        if (newPartnerId.equals(previousPartnerId)) {
+            return this;
+        }
+        this.partnerId = newPartnerId;
+        this.status = "accepted";
+        this.updatedAt = Instant.now();
+        registerEvent(new PickupReassignedEvent(this.id, previousPartnerId, newPartnerId, UUID.randomUUID()));
+        return this;
+    }
+
+    /** Cancels an active assignment when the assigned partner is suspended. */
+    public boolean cancelForPartnerSuspension(UUID suspendedPartnerId) {
+        if (!suspendedPartnerId.equals(this.partnerId)) {
+            throw new IllegalArgumentException("Pickup is not assigned to the suspended partner");
+        }
+        if (!Set.of("accepted", "verified").contains(this.status)) {
+            return false;
+        }
+
+        this.status = "cancelled";
+        this.updatedAt = Instant.now();
+        registerEvent(new PickupCancelledEvent(this.id));
+        return true;
+    }
 
     public void verify(String category, String condition, String notes, String evidenceUrl, UUID verifiedBy) {
         this.status = "verified";

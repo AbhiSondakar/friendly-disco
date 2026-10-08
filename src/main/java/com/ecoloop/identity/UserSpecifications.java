@@ -37,4 +37,8 @@ public class UserSpecifications {
             return cb.or(nameLike, emailLike);
         };
     }
+
+    public static Specification<User> notDeleted() {
+        return (Root<User> root, CriteriaQuery<?> query, CriteriaBuilder cb) -> cb.isNull(root.get("deletedAt"));
+    }
 }

@@ -1,6 +1,7 @@
 package com.ecoloop.identity;
 
 import com.ecoloop.common.RateLimiterService;
+import com.ecoloop.common.security.Role;
 import com.ecoloop.common.SessionUser;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -44,6 +45,7 @@ public class AuthController {
     private final IdentityService identityApi;
     private final RateLimiterService rateLimiter;
     private final PasswordResetService passwordResetService;
+    private final EmailVerificationService emailVerificationService;
 
     @Value("${ecoloop.security.trusted-proxies:}")
     private String trustedProxies;
@@ -53,13 +55,15 @@ public class AuthController {
                           PasswordEncoder encoder,
                           IdentityService identityApi,
                           RateLimiterService rateLimiter,
-                          PasswordResetService passwordResetService) {
+                          PasswordResetService passwordResetService,
+                          EmailVerificationService emailVerificationService) {
         this.authManager = authManager;
         this.users = users;
         this.encoder = encoder;
         this.identityApi = identityApi;
         this.rateLimiter = rateLimiter;
         this.passwordResetService = passwordResetService;
+        this.emailVerificationService = emailVerificationService;
     }
 
     public record RegisterRequest(
@@ -91,11 +95,14 @@ public class AuthController {
         u.setName(req.name().trim());
         if (req.phone() != null) u.setPhone(req.phone().trim());
         if (req.address() != null) u.setAddress(req.address().trim());
-        u.setRole(User.Role.HOUSEHOLD.name());
+        u.setRole(Role.HOUSEHOLD.name());
         u.setActive(true);
+        u.setEmailVerified(false);
         u.setCreatedAt(Instant.now());
         u.setUpdatedAt(Instant.now());
         users.save(u);
+
+        emailVerificationService.sendVerificationEmail(u);
 
         log.info("User registered successfully: userId={} role=HOUSEHOLD", u.getId());
         establishSession(normalizedEmail, req.password(), httpReq);
@@ -114,15 +121,23 @@ public class AuthController {
         String normalizedEmail = User.normalizeEmail(req.email());
 
         rateLimiter.checkLimit("login-ip", ip, 10, Duration.ofMinutes(1));
-        rateLimiter.checkLimit("login-account", normalizedEmail, 5, Duration.ofMinutes(1));
+        rateLimiter.checkLoginLockout(normalizedEmail);
 
-        Authentication auth = authManager.authenticate(
-            new UsernamePasswordAuthenticationToken(normalizedEmail, req.password()));
+        Authentication auth;
+        try {
+            auth = authManager.authenticate(
+                new UsernamePasswordAuthenticationToken(normalizedEmail, req.password()));
+        } catch (org.springframework.security.core.AuthenticationException ex) {
+            rateLimiter.recordLoginFailure(normalizedEmail);
+            throw ex;
+        }
+
+        rateLimiter.resetLoginFailures(normalizedEmail);
 
         User u = users.findByEmailIgnoreCase(normalizedEmail)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid credentials"));
 
-        if (!u.isActive()) {
+        if (!u.isActive() || u.isDeleted()) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Account is disabled");
         }
 
@@ -174,6 +189,27 @@ public class AuthController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void resetPassword(@Valid @RequestBody ResetPasswordRequest req) {
         passwordResetService.resetPassword(req.token(), req.newPassword());
+    }
+
+    public record VerifyEmailRequest(
+        @NotBlank String token) {}
+
+    @PostMapping("/verify-email")
+    @ResponseStatus(HttpStatus.OK)
+    public Map<String, String> verifyEmail(@Valid @RequestBody VerifyEmailRequest req) {
+        emailVerificationService.verifyEmail(req.token());
+        return Map.of("status", "success", "message", "Email verified successfully");
+    }
+
+    public record ResendVerificationRequest(
+        @NotBlank @Email String email) {}
+
+    @PostMapping("/resend-verification")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public void resendVerification(@Valid @RequestBody ResendVerificationRequest req, HttpServletRequest httpReq) {
+        String ip = clientIp(httpReq);
+        rateLimiter.checkLimit("resend-verification-ip", ip, 5, Duration.ofMinutes(1));
+        emailVerificationService.resendVerification(req.email());
     }
 
     @GetMapping("/me")

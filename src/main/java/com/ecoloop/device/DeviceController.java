@@ -2,15 +2,18 @@ package com.ecoloop.device;
 
 import com.ecoloop.classification.api.ClassificationApi;
 import com.ecoloop.classification.api.ClassificationResult;
+import com.ecoloop.common.security.ActorContext;
 import com.ecoloop.common.SessionUser;
 import com.ecoloop.common.upload.FileStorageService;
-import com.ecoloop.pickup.PickupRequest;
+import com.ecoloop.pickup.PickupWithDevice;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -44,15 +47,16 @@ public class DeviceController {
     }
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public Device submit(@RequestPart("image") MultipartFile image,
-                         @RequestParam(defaultValue = "good") String condition,
-                         HttpServletRequest r) throws IOException {
+    public DeviceDto submit(@RequestPart("image") MultipartFile image,
+                            @RequestParam(defaultValue = "good") String condition,
+                            HttpServletRequest r) throws IOException {
         UUID userId = user(r);
         FileStorageService.StoredFile stored = fileStorageService.storeFile(userId, "devices", image, false);
         String mime = stored.metadata().getContentType();
         String imageUrl = stored.publicUri();
 
-        return createDevice(userId, stored.content(), mime, condition, imageUrl);
+        Device created = createDevice(userId, stored.content(), mime, condition, imageUrl);
+        return DeviceDto.from(created);
     }
 
     private Device createDevice(UUID userId, byte[] image, String mime, String condition, String imageUrl) {
@@ -61,15 +65,15 @@ public class DeviceController {
         ClassificationResult result = classificationApi.classify(image, mime, deviceId, imageUrl);
 
         if ("failed".equals(result.status())) {
-            throw new org.springframework.web.server.ResponseStatusException(
-                org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE, 
+            throw new ResponseStatusException(
+                HttpStatus.SERVICE_UNAVAILABLE,
                 "AI classification failed due to a backend issue. Please try again later."
             );
         }
 
         if (result.confidence() == 0.0 && !result.requiresManualReview()) {
-            throw new org.springframework.web.server.ResponseStatusException(
-                org.springframework.http.HttpStatus.UNPROCESSABLE_ENTITY, 
+            throw new ResponseStatusException(
+                HttpStatus.UNPROCESSABLE_ENTITY,
                 "AI model could not classify the image. Please provide a clearer picture."
             );
         }
@@ -94,21 +98,23 @@ public class DeviceController {
     }
 
     @GetMapping
-    public List<Device> list(HttpServletRequest r) {
-        return devices.findAllByUserIdOrderByCreatedAtDesc(user(r));
+    public List<DeviceDto> list(HttpServletRequest r) {
+        return devices.findAllByUserIdOrderByCreatedAtDesc(user(r)).stream()
+            .map(DeviceDto::from)
+            .toList();
     }
 
     @GetMapping("/{id}")
-    public Device get(@PathVariable UUID id, HttpServletRequest r) {
+    public DeviceDto get(@PathVariable UUID id, HttpServletRequest r) {
         return devices.findByIdAndUserId(id, user(r))
+            .map(DeviceDto::from)
             .orElseThrow(() -> new NoSuchElementException("Device not found"));
     }
 
     @PostMapping("/{id}/cancel-pickup")
-    public PickupRequest cancelPickup(@PathVariable UUID id, HttpServletRequest r) {
-        UUID userId = user(r);
-        Device device = devices.findByIdAndUserId(id, userId)
+    public PickupWithDevice cancelPickup(@PathVariable UUID id, ActorContext actor) {
+        Device device = devices.findByIdAndUserId(id, actor.userId())
             .orElseThrow(() -> new NoSuchElementException("Device not found"));
-        return pickupService.cancelPickupByDevice(userId, device.getId());
+        return pickupService.enrich(pickupService.cancelOwnedPickupByDevice(actor, device.getId()));
     }
 }

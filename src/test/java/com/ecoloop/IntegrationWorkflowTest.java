@@ -1,9 +1,12 @@
 package com.ecoloop;
 
+import com.ecoloop.common.security.ActorContext;
+import com.ecoloop.common.security.Role;
 import com.ecoloop.device.Device;
 import com.ecoloop.device.DeviceRepository;
 import com.ecoloop.partner.Partner;
 import com.ecoloop.partner.PartnerRepository;
+import com.ecoloop.pickup.CreatePickup;
 import com.ecoloop.pickup.PickupRequest;
 import com.ecoloop.pickup.PickupService;
 import com.ecoloop.routing.RoutingOffer;
@@ -76,7 +79,8 @@ class IntegrationWorkflowTest {
         device = deviceRepository.save(device);
 
         // 2. Create a Pickup -> Should publish PickupCreatedEvent -> RoutingService should create Offers
-        PickupRequest pickup = pickupService.createPickup(householdUserId, device.getId(), "123 Main St", null);
+        ActorContext household = new ActorContext(householdUserId, Role.HOUSEHOLD);
+        PickupRequest pickup = pickupService.createPickup(household, new CreatePickup(device.getId(), "123 Main St", null));
         
         assertNotNull(pickup.getId());
         assertEquals("pending", pickup.getStatus());
@@ -114,13 +118,14 @@ class IntegrationWorkflowTest {
         device = deviceRepository.save(device);
 
         // 2. Create Pickup
-        PickupRequest pickup = pickupService.createPickup(householdUserId, device.getId(), "123 Main St", null);
+        ActorContext household = new ActorContext(householdUserId, Role.HOUSEHOLD);
+        PickupRequest pickup = pickupService.createPickup(household, new CreatePickup(device.getId(), "123 Main St", null));
         
         List<RoutingOffer> offers = offerRepository.findAllByPickupId(pickup.getId());
         assertEquals(2, offers.size());
 
         // 3. Cancel Pickup -> Should publish PickupCancelledEvent -> RoutingService cancels offers
-        pickupService.cancelPickup(householdUserId, pickup.getId());
+        pickupService.cancelOwnedPickup(household, pickup.getId());
 
         // Verify Offers are cancelled
         List<RoutingOffer> cancelledOffers = offerRepository.findAllByPickupId(pickup.getId());

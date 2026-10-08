@@ -1,20 +1,20 @@
 package com.ecoloop.pickup;
 
-import jakarta.servlet.http.HttpServletRequest;
+import com.ecoloop.common.security.ActorContext;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
-import org.springframework.http.HttpStatus;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
 import java.util.NoSuchElementException;
-import java.util.Set;
 import java.util.UUID;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 @RestController
 @RequestMapping("/api/pickups")
@@ -29,76 +29,65 @@ public class PickupController {
         this.pickupService = pickupService;
     }
 
-    private UUID user(HttpServletRequest r) {
-        return com.ecoloop.common.SessionUser.require(r).id();
-    }
-
-    public record CreatePickup(
-        UUID deviceId,
-        @NotBlank String address,
-        Instant scheduledAt) {}
-
-    @PostMapping(value = "/submit-household", consumes = org.springframework.http.MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PostMapping(value = "/submit-household", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public PickupWithDevice submitHousehold(
-        @RequestPart("image") org.springframework.web.multipart.MultipartFile image,
+        @RequestPart("image") MultipartFile image,
         @RequestParam(defaultValue = "good") String condition,
         @RequestParam @NotBlank String address,
         @RequestParam(required = false) Instant scheduledAt,
-        HttpServletRequest r) throws java.io.IOException {
-        UUID userId = user(r);
-        return pickupService.submitHouseholdPickup(userId, image, condition, address, scheduledAt);
+        ActorContext actor) throws IOException {
+        return pickupService.submitHouseholdPickup(actor, image, condition, address, scheduledAt);
     }
 
     @PostMapping
-    public PickupWithDevice create(@Valid @RequestBody CreatePickup body, HttpServletRequest r) {
-        PickupRequest pickup = pickupService.createPickup(user(r), body.deviceId(), body.address(), body.scheduledAt());
-        log.info("Pickup created: id={} user={} device={}", pickup.getId(), user(r), body.deviceId());
+    public PickupWithDevice create(@Valid @RequestBody CreatePickup body, ActorContext actor) {
+        PickupRequest pickup = pickupService.createPickup(actor, body);
+        log.info("Pickup created: id={} user={} device={}", pickup.getId(), actor.userId(), body.deviceId());
         return pickupService.enrich(pickup);
     }
 
     @GetMapping
-    public List<PickupWithDevice> list(HttpServletRequest r) {
-        return pickupService.enrich(pickups.findAllByUserIdOrderByCreatedAtDesc(user(r)));
+    public List<PickupWithDevice> list(ActorContext actor) {
+        return pickupService.enrich(pickups.findAllByUserIdOrderByCreatedAtDesc(actor.userId()));
     }
 
     @GetMapping("/{id}")
-    public PickupWithDevice get(@PathVariable UUID id, HttpServletRequest r) {
-        PickupRequest pickup = pickups.findByIdAndUserId(id, user(r))
+    public PickupWithDevice get(@PathVariable UUID id, ActorContext actor) {
+        PickupRequest pickup = pickups.findByIdAndUserId(id, actor.userId())
             .orElseThrow(() -> new NoSuchElementException("Pickup not found"));
         return pickupService.enrich(pickup);
     }
 
     @PostMapping("/{id}/accept")
     @PreAuthorize("hasRole('PARTNER')")
-    public PickupWithDevice accept(@PathVariable UUID id, HttpServletRequest r) {
-        UUID actor = user(r);
-        PickupRequest result = pickupService.acceptByPartnerUser(actor, id);
-        log.info("Pickup accepted: id={} by partner={}", id, actor);
+    public PickupWithDevice accept(@PathVariable UUID id,
+                                   @Valid @RequestBody AcceptRequest body,
+                                   ActorContext actor) {
+        PickupRequest result = pickupService.acceptOfferedPickup(actor, id, body.offerId());
+        log.info("Pickup accepted: id={} by partner={} offer={}", id, actor.userId(), body.offerId());
         return pickupService.enrich(result);
     }
 
     @PostMapping("/{id}/complete")
     @PreAuthorize("hasRole('PARTNER')")
-    public PickupWithDevice complete(@PathVariable UUID id, HttpServletRequest r) {
-        UUID actor = user(r);
-        PickupRequest result = pickupService.completeForPartnerUser(actor, id);
-        log.info("Pickup completed: id={} by partner={}", id, actor);
+    public PickupWithDevice complete(@PathVariable UUID id, ActorContext actor) {
+        PickupRequest result = pickupService.completeAssignedPickup(actor, id);
+        log.info("Pickup completed: id={} by partner={}", id, actor.userId());
         return pickupService.enrich(result);
     }
 
     @PostMapping("/{id}/reject")
     @PreAuthorize("hasRole('PARTNER')")
-    public PickupWithDevice reject(@PathVariable UUID id, HttpServletRequest r) {
-        UUID actor = user(r);
-        PickupRequest result = pickupService.rejectByPartnerUser(actor, id);
-        log.info("Pickup rejected: id={} by partner={}", id, actor);
+    public PickupWithDevice reject(@PathVariable UUID id, ActorContext actor) {
+        PickupRequest result = pickupService.rejectAssignedPickup(actor, id, null);
+        log.info("Pickup rejected: id={} by partner={}", id, actor.userId());
         return pickupService.enrich(result);
     }
 
     @PostMapping("/{id}/cancel")
-    public PickupWithDevice cancel(@PathVariable UUID id, HttpServletRequest r) {
-        PickupRequest saved = pickupService.cancelPickup(user(r), id);
-        log.info("Pickup cancelled: id={} user={}", id, user(r));
+    public PickupWithDevice cancel(@PathVariable UUID id, ActorContext actor) {
+        PickupRequest saved = pickupService.cancelOwnedPickup(actor, id);
+        log.info("Pickup cancelled: id={} user={}", id, actor.userId());
         return pickupService.enrich(saved);
     }
 }

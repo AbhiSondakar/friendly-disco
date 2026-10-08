@@ -60,6 +60,13 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
     }
 
+    @ExceptionHandler(org.springframework.http.converter.HttpMessageNotReadableException.class)
+    public ResponseEntity<Map<String, Object>> handleMessageNotReadable(org.springframework.http.converter.HttpMessageNotReadableException ex) {
+        log.warn("Malformed or missing request body: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+            .body(errorBody(HttpStatus.BAD_REQUEST, "Required request body is missing or malformed"));
+    }
+
     @ExceptionHandler(ConstraintViolationException.class)
     public ResponseEntity<Map<String, Object>> handleConstraintViolation(ConstraintViolationException ex) {
         log.warn("Constraint violation: {}", ex.getMessage());
@@ -67,11 +74,18 @@ public class GlobalExceptionHandler {
             .body(errorBody(HttpStatus.BAD_REQUEST, ex.getMessage()));
     }
 
+    @ExceptionHandler(com.ecoloop.common.DomainException.class)
+    public ResponseEntity<Map<String, Object>> handleDomainException(com.ecoloop.common.DomainException ex) {
+        log.warn("Domain exception: internalDetail='{}', clientSafeMessage='{}'", ex.getMessage(), ex.getClientSafeMessage());
+        return ResponseEntity.status(ex.getStatus())
+            .body(errorBody(ex.getStatus(), ex.getClientSafeMessage()));
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<Map<String, Object>> handleIllegalArgument(IllegalArgumentException ex) {
         log.warn("Bad request argument: {}", ex.getMessage());
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-            .body(errorBody(HttpStatus.BAD_REQUEST, ex.getMessage()));
+            .body(errorBody(HttpStatus.BAD_REQUEST, "Invalid request argument"));
     }
 
     @ExceptionHandler({BadCredentialsException.class, UsernameNotFoundException.class, AuthenticationException.class})

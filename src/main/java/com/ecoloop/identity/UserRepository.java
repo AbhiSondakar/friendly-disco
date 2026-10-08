@@ -11,5 +11,6 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
     Optional<User> findByEmail(String email);
     Optional<User> findByEmailIgnoreCase(String email);
     boolean existsByEmailIgnoreCase(String email);
+    java.util.List<User> findAllByRole(String role);
     @Lock(LockModeType.PESSIMISTIC_WRITE) Optional<User> findLockedById(UUID id);
 }

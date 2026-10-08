@@ -6,8 +6,12 @@ import com.ecoloop.common.web.PageResponse;
 import com.ecoloop.identity.UserRepository;
 import com.ecoloop.partner.PartnerRepository;
 import com.ecoloop.pickup.PickupRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.info.BuildProperties;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
@@ -18,10 +22,18 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import javax.sql.DataSource;
+import java.io.BufferedWriter;
+import java.io.OutputStreamWriter;
 import java.lang.management.ManagementFactory;
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.time.Duration;
 import java.time.Instant;
@@ -29,6 +41,7 @@ import java.util.*;
 
 @RestController
 @PreAuthorize("hasRole('ADMIN')")
+@Validated
 public class AdminAuditController {
 
     private final AuditLogRepository audit;
@@ -39,6 +52,8 @@ public class AdminAuditController {
     private final Optional<BuildProperties> buildProperties;
     private final DataSource dataSource;
     private final ObjectProvider<RedisConnectionFactory> redisConnectionFactoryProvider;
+    private final TransactionTemplate transactionTemplate;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public AdminAuditController(AuditLogRepository audit,
                                 UserRepository users,
@@ -47,7 +62,8 @@ public class AdminAuditController {
                                 PredictionRepository predictions,
                                 Optional<BuildProperties> buildProperties,
                                 DataSource dataSource,
-                                ObjectProvider<RedisConnectionFactory> redisConnectionFactoryProvider) {
+                                ObjectProvider<RedisConnectionFactory> redisConnectionFactoryProvider,
+                                PlatformTransactionManager transactionManager) {
         this.audit = audit;
         this.users = users;
         this.partners = partners;
@@ -56,52 +72,129 @@ public class AdminAuditController {
         this.buildProperties = buildProperties;
         this.dataSource = dataSource;
         this.redisConnectionFactoryProvider = redisConnectionFactoryProvider;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this.transactionTemplate.setPropagationBehaviorName("PROPAGATION_REQUIRES_NEW");
     }
 
     @PreAuthorize("hasRole('ADMIN')")
     @GetMapping("/api/admin/audit")
-    public PageResponse<AuditLog> listAudit(@RequestParam(defaultValue = "0") int page,
-                                            @RequestParam(defaultValue = "100") int size,
-                                            @RequestParam(required = false) String search) {
-        int boundedPage = Math.max(0, page);
-        int boundedSize = Math.min(Math.max(1, size), 500);
+    public PageResponse<AuditLogDto> listAudit(
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(200) int size,
+            @RequestParam(required = false) String search) {
         Specification<AuditLog> spec = AuditSpecifications.withSearch(search);
-        return PageResponse.of(audit.findAll(spec, PageRequest.of(boundedPage, boundedSize, Sort.by(Sort.Direction.DESC, "createdAt"))));
+        Page<AuditLog> auditPage = audit.findAll(spec, PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt")));
+        return PageResponse.of(auditPage).mapContent(AuditLogDto::from);
     }
 
     @PreAuthorize("hasRole('ADMIN')")
     @GetMapping(value = "/api/admin/audit/export", produces = "text/csv")
-    public ResponseEntity<String> exportAuditCsv(@RequestParam(defaultValue = "1000") int limit,
-                                                 @RequestParam(required = false) String search) {
+    public ResponseEntity<StreamingResponseBody> exportAuditCsv(
+            @RequestParam(defaultValue = "1000") int limit,
+            @RequestParam(required = false) String search) {
+        // 1. Capture authorization data before returning the response
+        var auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated()) {
+            throw new org.springframework.security.access.AccessDeniedException("Unauthorized");
+        }
+
         int boundedLimit = Math.min(Math.max(1, limit), 5000);
         Specification<AuditLog> spec = AuditSpecifications.withSearch(search);
-        List<AuditLog> logs = audit.findAll(spec, PageRequest.of(0, boundedLimit, Sort.by(Sort.Direction.DESC, "createdAt"))).getContent();
 
-        StringBuilder sb = new StringBuilder();
-        sb.append("id,actor_id,actor_role,action,entity_type,entity_id,result,created_at\n");
-        for (AuditLog l : logs) {
-            sb.append(escapeCsv(l.getId() != null ? l.getId().toString() : "")).append(',');
-            sb.append(escapeCsv(l.getActorId() != null ? l.getActorId().toString() : "")).append(',');
-            sb.append(escapeCsv(l.getActorRole() != null ? l.getActorRole() : "")).append(',');
-            sb.append(escapeCsv(l.getAction() != null ? l.getAction() : "")).append(',');
-            sb.append(escapeCsv(l.getEntityType() != null ? l.getEntityType() : "")).append(',');
-            sb.append(escapeCsv(l.getEntityId() != null ? l.getEntityId().toString() : "")).append(',');
-            sb.append(escapeCsv(l.getResult() != null ? l.getResult() : "")).append(',');
-            sb.append(escapeCsv(l.getCreatedAt() != null ? l.getCreatedAt().toString() : "")).append('\n');
-        }
+        // 2. Stream response via worker thread using StreamingResponseBody
+        StreamingResponseBody responseBody = outputStream -> {
+            try (var writer = new BufferedWriter(new OutputStreamWriter(outputStream, StandardCharsets.UTF_8))) {
+                writer.write("id,actor_id,actor_role,action,entity_type,entity_id,result,details,created_at\n");
+                int pageSize = 100;
+                int fetched = 0;
+                int pageNum = 0;
+                while (fetched < boundedLimit) {
+                    final int currentPage = pageNum++;
+                    final int toFetch = Math.min(pageSize, boundedLimit - fetched);
+
+                    // Execute each page fetch in REQUIRES_NEW transaction without SecurityContextHolder reliance
+                    List<AuditLog> batch = transactionTemplate.execute(status -> {
+                        return audit.findAll(spec, PageRequest.of(currentPage, toFetch, Sort.by(Sort.Direction.DESC, "createdAt"))).getContent();
+                    });
+
+                    if (batch == null || batch.isEmpty()) {
+                        break;
+                    }
+
+                    for (AuditLog l : batch) {
+                        writer.write(escapeCsv(l.getId() != null ? l.getId().toString() : ""));
+                        writer.write(',');
+                        writer.write(escapeCsv(l.getActorId() != null ? l.getActorId().toString() : ""));
+                        writer.write(',');
+                        writer.write(escapeCsv(l.getActorRole() != null ? l.getActorRole() : ""));
+                        writer.write(',');
+                        writer.write(escapeCsv(l.getAction() != null ? l.getAction() : ""));
+                        writer.write(',');
+                        writer.write(escapeCsv(l.getEntityType() != null ? l.getEntityType() : ""));
+                        writer.write(',');
+                        writer.write(escapeCsv(l.getEntityId() != null ? l.getEntityId().toString() : ""));
+                        writer.write(',');
+                        writer.write(escapeCsv(l.getResult() != null ? l.getResult() : ""));
+                        writer.write(',');
+                        writer.write(escapeCsv(serializeAndRedactDetails(l.getDetails())));
+                        writer.write(',');
+                        writer.write(escapeCsv(l.getCreatedAt() != null ? l.getCreatedAt().toString() : ""));
+                        writer.write('\n');
+                        fetched++;
+                    }
+                    writer.flush();
+                    if (batch.size() < toFetch) {
+                        break;
+                    }
+                }
+            }
+        };
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.parseMediaType("text/csv"));
         headers.setContentDispositionFormData("attachment", "audit-log.csv");
-        return new ResponseEntity<>(sb.toString(), headers, HttpStatus.OK);
+        return new ResponseEntity<>(responseBody, headers, HttpStatus.OK);
     }
 
-    private String escapeCsv(String s) {
-        if (s == null) return "";
-        if (s.contains(",") || s.contains("\"") || s.contains("\n")) {
+    public static String escapeCsv(String s) {
+        if (s == null || s.isEmpty()) return "";
+        // Formula injection protection: if value starts with =, +, -, @, \t, \r, prepend single quote '
+        char first = s.charAt(0);
+        if (first == '=' || first == '+' || first == '-' || first == '@' || first == '\t' || first == '\r') {
+            s = "'" + s;
+        }
+        if (s.contains(",") || s.contains("\"") || s.contains("\n") || s.contains("\r")) {
             return "\"" + s.replace("\"", "\"\"") + "\"";
         }
         return s;
+    }
+
+    private String serializeAndRedactDetails(Map<String, Object> details) {
+        if (details == null || details.isEmpty()) return "{}";
+        try {
+            Map<String, Object> redacted = redactMap(details);
+            return objectMapper.writeValueAsString(redacted);
+        } catch (Exception e) {
+            return "{}";
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> redactMap(Map<String, Object> map) {
+        if (map == null) return Map.of();
+        Map<String, Object> result = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> entry : map.entrySet()) {
+            String key = entry.getKey();
+            Object val = entry.getValue();
+            if (AuditRedactionKeys.isSensitive(key)) {
+                result.put(key, "[redacted]");
+            } else if (val instanceof Map<?, ?> nested) {
+                result.put(key, redactMap((Map<String, Object>) nested));
+            } else {
+                result.put(key, val);
+            }
+        }
+        return result;
     }
 
     @PreAuthorize("hasRole('ADMIN')")

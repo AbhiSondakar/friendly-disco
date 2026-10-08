@@ -1,12 +1,17 @@
 package com.ecoloop;
 
+import com.ecoloop.common.security.ActorContext;
+import com.ecoloop.common.security.Role;
 import com.ecoloop.device.Device;
 import com.ecoloop.device.DeviceRepository;
 import com.ecoloop.partner.Partner;
 import com.ecoloop.partner.PartnerRepository;
+import com.ecoloop.pickup.CreatePickup;
 import com.ecoloop.pickup.PickupRepository;
 import com.ecoloop.pickup.PickupRequest;
 import com.ecoloop.pickup.PickupService;
+import com.ecoloop.routing.RoutingOffer;
+import com.ecoloop.routing.RoutingOfferRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,6 +21,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -39,6 +45,9 @@ class PickupConcurrencyTest {
     private DeviceRepository deviceRepository;
 
     @Autowired
+    private RoutingOfferRepository offerRepository;
+
+    @Autowired
     private PlatformTransactionManager transactionManager;
 
     private TransactionTemplate txTemplate;
@@ -48,10 +57,24 @@ class PickupConcurrencyTest {
         txTemplate = new TransactionTemplate(transactionManager);
         txTemplate.setPropagationBehaviorName("PROPAGATION_REQUIRES_NEW");
         txTemplate.execute(status -> {
+            offerRepository.deleteAll();
             pickupRepository.deleteAll();
             partnerRepository.deleteAll();
             deviceRepository.deleteAll();
             return null;
+        });
+    }
+
+    private UUID getOrCreateOffer(UUID pickupId, UUID partnerId) {
+        return txTemplate.execute(status -> {
+            return offerRepository.findAllByPickupId(pickupId).stream()
+                .filter(o -> o.getPartnerId().equals(partnerId))
+                .map(RoutingOffer::getId)
+                .findFirst()
+                .orElseGet(() -> {
+                    RoutingOffer o = new RoutingOffer(pickupId, partnerId, Instant.now().plusSeconds(3600));
+                    return offerRepository.save(o).getId();
+                });
         });
     }
 
@@ -75,7 +98,10 @@ class PickupConcurrencyTest {
 
     private PickupRequest createPickup(UUID householdUserId, UUID deviceId, String address) {
         return txTemplate.execute(status ->
-            pickupService.createPickup(householdUserId, deviceId, address, null));
+            pickupService.createPickup(
+                new ActorContext(householdUserId, Role.HOUSEHOLD),
+                new CreatePickup(deviceId, address, null)
+            ));
     }
 
     @Test
@@ -92,6 +118,11 @@ class PickupConcurrencyTest {
             pickupIds.add(p.getId());
         }
 
+        List<UUID> offerIds = new ArrayList<>();
+        for (int i = 0; i < threadCount; i++) {
+            offerIds.add(getOrCreateOffer(pickupIds.get(i), partner.getId()));
+        }
+
         ExecutorService executor = Executors.newFixedThreadPool(threadCount);
         CountDownLatch startGate = new CountDownLatch(1);
         CountDownLatch endGate = new CountDownLatch(threadCount);
@@ -102,10 +133,12 @@ class PickupConcurrencyTest {
 
         for (int i = 0; i < threadCount; i++) {
             final UUID pickupId = pickupIds.get(i);
+            final UUID offerId = offerIds.get(i);
             executor.submit(() -> {
                 try {
                     startGate.await();
-                    PickupRequest accepted = pickupService.acceptByPartnerUser(partnerUserId, pickupId);
+                    PickupRequest accepted = pickupService.acceptOfferedPickup(
+                        new ActorContext(partnerUserId, Role.PARTNER), pickupId, offerId);
                     if ("accepted".equals(accepted.getStatus())
                         && partner.getId().equals(accepted.getPartnerId())) {
                         successCount.incrementAndGet();
@@ -167,6 +200,11 @@ class PickupConcurrencyTest {
             partnerUserIds.add(i % 2 == 0 ? partnerUserId1 : partnerUserId2);
         }
 
+        Partner p1 = partnerRepository.findByUserId(partnerUserId1).orElseThrow();
+        Partner p2 = partnerRepository.findByUserId(partnerUserId2).orElseThrow();
+        UUID offerId1 = getOrCreateOffer(pickupId, p1.getId());
+        UUID offerId2 = getOrCreateOffer(pickupId, p2.getId());
+
         ExecutorService executor = Executors.newFixedThreadPool(threadCount);
         CountDownLatch startGate = new CountDownLatch(1);
         CountDownLatch endGate = new CountDownLatch(threadCount);
@@ -176,10 +214,12 @@ class PickupConcurrencyTest {
 
         for (int i = 0; i < threadCount; i++) {
             final UUID partnerUserId = partnerUserIds.get(i);
+            final UUID offerId = partnerUserId.equals(partnerUserId1) ? offerId1 : offerId2;
             executor.submit(() -> {
                 try {
                     startGate.await();
-                    PickupRequest accepted = pickupService.acceptByPartnerUser(partnerUserId, pickupId);
+                    PickupRequest accepted = pickupService.acceptOfferedPickup(
+                        new ActorContext(partnerUserId, Role.PARTNER), pickupId, offerId);
                     if ("accepted".equals(accepted.getStatus())) {
                         successCount.incrementAndGet();
                     }
@@ -238,13 +278,21 @@ class PickupConcurrencyTest {
             pickupIds.add(p.getId());
         }
 
+        List<UUID> offerIds = new ArrayList<>();
+        for (int i = 0; i < partnerCount; i++) {
+            Partner p = partnerRepository.findByUserId(partnerUserIds.get(i)).orElseThrow();
+            offerIds.add(getOrCreateOffer(pickupIds.get(i), p.getId()));
+        }
+
         for (int i = 0; i < partnerCount; i++) {
             final UUID puid = partnerUserIds.get(i);
             final UUID pid = pickupIds.get(i);
+            final UUID offerId = offerIds.get(i);
             executor.submit(() -> {
                 try {
                     startGate.await();
-                    PickupRequest accepted = pickupService.acceptByPartnerUser(puid, pid);
+                    PickupRequest accepted = pickupService.acceptOfferedPickup(
+                        new ActorContext(puid, Role.PARTNER), pid, offerId);
                     if ("accepted".equals(accepted.getStatus())) {
                         successCount.incrementAndGet();
                     }
@@ -269,7 +317,7 @@ class PickupConcurrencyTest {
     }
 
     @Test
-    void lockOrderingPartnersThenPickupsPreventsDeadlockUnderLoad() throws Exception {
+    void lockOrderingPickupThenPartnerPreventsDeadlockUnderLoad() throws Exception {
         final int partnerCount = 6;
         final int pickupsPerPartner = 4;
         final int totalAttempts = partnerCount * pickupsPerPartner;
@@ -278,6 +326,7 @@ class PickupConcurrencyTest {
         CountDownLatch endGate = new CountDownLatch(totalAttempts);
         AtomicInteger successCount = new AtomicInteger(0);
         AtomicInteger expectedRejectionCount = new AtomicInteger(0);
+        AtomicInteger lockFailureCount = new AtomicInteger(0);
         List<Throwable> unexpectedErrors = Collections.synchronizedList(new ArrayList<>());
 
         List<UUID> partnerUserIds = new ArrayList<>();
@@ -305,13 +354,23 @@ class PickupConcurrencyTest {
         }
         Collections.shuffle(tasks, new Random(42));
 
+        Map<String, UUID> offerMap = new HashMap<>();
+        for (UUID pid : allPickupIds) {
+            for (UUID puid : partnerUserIds) {
+                Partner p = partnerRepository.findByUserId(puid).orElseThrow();
+                offerMap.put(pid + ":" + puid, getOrCreateOffer(pid, p.getId()));
+            }
+        }
+
         for (int[] task : tasks) {
             final UUID puid = partnerUserIds.get(task[0]);
             final UUID pid = allPickupIds.get(task[1]);
+            final UUID offerId = offerMap.get(pid + ":" + puid);
             executor.submit(() -> {
                 try {
                     startGate.await();
-                    PickupRequest accepted = pickupService.acceptByPartnerUser(puid, pid);
+                    PickupRequest accepted = pickupService.acceptOfferedPickup(
+                        new ActorContext(puid, Role.PARTNER), pid, offerId);
                     if ("accepted".equals(accepted.getStatus())) {
                         successCount.incrementAndGet();
                     }
@@ -328,7 +387,7 @@ class PickupConcurrencyTest {
                     if (className.contains("Lock")
                         || className.contains("Timeout")
                         || className.contains("CannotAcquire")) {
-                        expectedRejectionCount.incrementAndGet();
+                        lockFailureCount.incrementAndGet();
                     } else {
                         unexpectedErrors.add(ex);
                     }
@@ -352,6 +411,8 @@ class PickupConcurrencyTest {
                 + unexpectedErrors);
         assertTrue(unexpectedErrors.isEmpty(),
             "No unexpected throwables during deadlock-avoidance load test: " + unexpectedErrors);
+        assertEquals(0, lockFailureCount.get(),
+            "Contended acceptance must resolve through the pickup state/capacity checks, not database lock failures");
 
         for (UUID puid : partnerUserIds) {
             Partner partner = txTemplate.execute(status ->

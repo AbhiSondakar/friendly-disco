@@ -2,6 +2,10 @@ package com.ecoloop.pickup;
 
 import com.ecoloop.common.web.PageResponse;
 import com.ecoloop.partner.PartnerRepository;
+import com.ecoloop.common.security.ActorContext;
+import com.fasterxml.jackson.annotation.JsonAlias;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotNull;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -18,6 +22,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/admin/pickups")
 @PreAuthorize("hasRole('ADMIN')")
+@org.springframework.validation.annotation.Validated
 public class AdminPickupController {
   private final PickupRepository pickups;
   private final PartnerRepository partners;
@@ -31,13 +36,12 @@ public class AdminPickupController {
 
   @PreAuthorize("hasRole('ADMIN')")
   @GetMapping
-  public PageResponse<PickupWithDevice> list(@RequestParam(defaultValue = "0") int page,
-                                             @RequestParam(defaultValue = "20") int size,
-                                             @RequestParam(required = false) String status,
-                                             @RequestParam(required = false) String search) {
-    int boundedPage = Math.max(0, page);
-    int boundedSize = Math.min(Math.max(1, size), 100);
-    PageRequest pageable = PageRequest.of(boundedPage, boundedSize, Sort.by(Sort.Direction.DESC, "createdAt"));
+  public PageResponse<PickupWithDevice> list(
+      @RequestParam(defaultValue = "0") @jakarta.validation.constraints.Min(0) int page,
+      @RequestParam(defaultValue = "20") @jakarta.validation.constraints.Min(1) @jakarta.validation.constraints.Max(200) int size,
+      @RequestParam(required = false) String status,
+      @RequestParam(required = false) String search) {
+    PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
     Specification<PickupRequest> spec = Specification.where(PickupSpecifications.withStatus(status))
             .and(PickupSpecifications.withSearch(search));
     Page<PickupRequest> pickupPage = pickups.findAll(spec, pageable);
@@ -46,22 +50,19 @@ public class AdminPickupController {
             pickupPage.getNumber(), pickupPage.getSize());
   }
 
-  public record ReassignRequest(UUID partnerId) {}
+  public record ReassignRequest(
+      @NotNull(message = "newPartnerId is required")
+      @JsonAlias("partnerId")
+      UUID newPartnerId
+  ) {}
 
   @PreAuthorize("hasRole('ADMIN')")
   @PostMapping("/{id}/reassign")
-  public PickupWithDevice reassign(@PathVariable UUID id,
-                                @RequestBody(required = false) ReassignRequest body) {
-    PickupRequest pickup = pickups.findById(id)
-        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Pickup not found"));
-    if (body != null && body.partnerId() != null) {
-      partners.findById(body.partnerId())
-          .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Partner not found"));
-      pickup.setPartnerId(body.partnerId());
-    } else {
-      pickup.setPartnerId(null);
-    }
-    pickup.setUpdatedAt(Instant.now());
-    return pickupService.enrich(pickups.save(pickup));
+  public PickupWithDevice reassign(
+      ActorContext actor,
+      @PathVariable UUID id,
+      @Valid @RequestBody ReassignRequest body) {
+    PickupRequest reassigned = pickupService.reassignPickup(actor, id, body.newPartnerId());
+    return pickupService.enrich(reassigned);
   }
 }

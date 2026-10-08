@@ -8,7 +8,6 @@ import java.util.UUID;
 @Entity
 @Table(name = "users")
 public class User {
-    public enum Role { HOUSEHOLD, PARTNER, ADMIN }
 
     @Id
     private UUID id = UUID.randomUUID();
@@ -35,11 +34,18 @@ public class User {
     @Column(name = "is_active", nullable = false)
     private boolean active = true;
 
+    @Column(name = "email_verified", nullable = false)
+    private boolean emailVerified = false;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt = Instant.now();
+
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
 
     protected User() {}
 
@@ -68,10 +74,31 @@ public class User {
     public void setName(String name) { this.name = name; }
     public String getAddress() { return address; }
     public void setAddress(String address) { this.address = address; }
-    public boolean isActive() { return active; }
+    public boolean isActive() { return active && deletedAt == null; }
     public void setActive(boolean active) { this.active = active; }
+    public boolean isEmailVerified() { return emailVerified; }
+    public void setEmailVerified(boolean emailVerified) { this.emailVerified = emailVerified; }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    public Instant getDeletedAt() { return deletedAt; }
+    public void setDeletedAt(Instant deletedAt) { this.deletedAt = deletedAt; }
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    public boolean isDeleted() { return deletedAt != null; }
+
+    public void softDelete() {
+        if (this.id == null) {
+            throw new IllegalStateException("Cannot soft-delete a transient User entity");
+        }
+        this.deletedAt = Instant.now();
+        this.active = false;
+        this.name = "Anonymized User";
+        this.email = "deleted_" + this.id + "@anonymized.invalid";
+        this.passwordHash = "ANONYMIZED_USER_SENTINEL_NON_AUTHENTICATABLE";
+        this.phone = null;
+        this.address = null;
+        this.updatedAt = Instant.now();
+    }
 }

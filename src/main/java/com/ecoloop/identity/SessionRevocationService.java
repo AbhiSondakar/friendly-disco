@@ -44,4 +44,33 @@ public class SessionRevocationService {
             log.warn("Failed to revoke sessions for user {}: {}", principalName, e.getMessage());
         }
     }
+
+    public void revokeOtherUserSessions(String principalName, String currentSessionId) {
+        if (principalName == null || principalName.isBlank()) {
+            return;
+        }
+
+        FindByIndexNameSessionRepository<? extends Session> repository = sessionRepositoryProvider.getIfAvailable();
+        if (repository == null) {
+            log.debug("Session repository not available for session revocation: principal={}", principalName);
+            return;
+        }
+
+        try {
+            String normalizedPrincipal = User.normalizeEmail(principalName);
+            Map<String, ? extends Session> sessions = repository.findByPrincipalName(normalizedPrincipal);
+            if (sessions != null && !sessions.isEmpty()) {
+                int revokedCount = 0;
+                for (String sessionId : sessions.keySet()) {
+                    if (currentSessionId == null || !sessionId.equals(currentSessionId)) {
+                        repository.deleteById(sessionId);
+                        revokedCount++;
+                    }
+                }
+                log.info("Revoked {} other active sessions for user: {}", revokedCount, normalizedPrincipal);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to revoke other sessions for user {}: {}", principalName, e.getMessage());
+        }
+    }
 }

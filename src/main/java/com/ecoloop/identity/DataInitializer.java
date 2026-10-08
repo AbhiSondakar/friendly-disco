@@ -1,5 +1,6 @@
 package com.ecoloop.identity;
 
+import com.ecoloop.common.security.Role;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.CommandLineRunner;
@@ -50,8 +51,9 @@ public class DataInitializer {
             admin.setEmail(normalized);
             admin.setPasswordHash(encoder.encode(password));
             admin.setName("System Administrator");
-            admin.setRole(User.Role.ADMIN.name());
+            admin.setRole(Role.ADMIN.name());
             admin.setActive(true);
+            admin.setEmailVerified(true);
             admin.setCreatedAt(Instant.now());
             admin.setUpdatedAt(Instant.now());
             users.save(admin);

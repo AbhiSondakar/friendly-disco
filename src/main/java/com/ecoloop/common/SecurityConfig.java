@@ -49,10 +49,11 @@ public class SecurityConfig {
                 .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
                 .csrfTokenRequestHandler(csrfHandler)
                 .ignoringRequestMatchers(
-                    "/api/auth/login",
                     "/api/auth/register",
                     "/api/auth/forgot-password",
-                    "/api/auth/reset-password"))
+                    "/api/auth/reset-password",
+                    "/api/auth/verify-email",
+                    "/api/auth/resend-verification"))
             .addFilterAfter(activeUserFilter, SecurityContextHolderFilter.class)
             .cors(c -> c.configurationSource(corsConfigurationSource()))
             // Browsers only honor HSTS when the request itself is HTTPS. TLS-terminating
@@ -69,7 +70,8 @@ public class SecurityConfig {
                 .requestMatchers("/", "/index.html", "/assets/**", "/favicon.ico",
                                  "/error", "/actuator/health",
                                  "/api/auth/login", "/api/auth/register", "/api/auth/csrf",
-                                 "/api/auth/forgot-password", "/api/auth/reset-password")
+                                 "/api/auth/forgot-password", "/api/auth/reset-password",
+                                 "/api/auth/verify-email", "/api/auth/resend-verification")
                     .permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/partners").authenticated()
                 .requestMatchers(HttpMethod.GET, "/api/partners/{id}").authenticated()
@@ -77,7 +79,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/partners/**").hasRole("PARTNER")
                 .requestMatchers("/actuator/**").hasRole("ADMIN")
                 .requestMatchers("/swagger-ui.html", "/swagger-ui/**",
-                                 "/v3/api-docs", "/v3/api-docs/**",
+                                 "/v3/api-docs", "/v3/api-docs/**", "/v3/api-docs.yaml",
                                  "/swagger-resources/**", "/webjars/**")
                     .hasRole("ADMIN")
                 .anyRequest().authenticated())

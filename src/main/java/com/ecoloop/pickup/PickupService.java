@@ -3,19 +3,22 @@ package com.ecoloop.pickup;
 import com.ecoloop.audit.AuditService;
 import com.ecoloop.classification.api.ClassificationApi;
 import com.ecoloop.classification.api.ClassificationResult;
+import com.ecoloop.common.security.ActorContext;
 import com.ecoloop.common.upload.FileStorageService;
 import com.ecoloop.device.Device;
 import com.ecoloop.device.DeviceRepository;
-import com.ecoloop.notification.NotificationService;
 import com.ecoloop.partner.Partner;
 import com.ecoloop.partner.PartnerRepository;
 import com.ecoloop.rewards.RewardLedger;
 import com.ecoloop.rewards.RewardLedgerRepository;
+import com.ecoloop.routing.RoutingOffer;
+import com.ecoloop.routing.RoutingOfferRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,7 +28,6 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
 import java.math.BigDecimal;
-import java.nio.file.Files;
 import java.time.Instant;
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -40,56 +42,60 @@ public class PickupService {
     private final PickupRepository pickups;
     private final PartnerRepository partners;
     private final RewardLedgerRepository ledger;
-    private final NotificationService notifications;
     private final AuditService audit;
     private final ApplicationEventPublisher events;
     private final DeviceRepository devices;
     private final FileStorageService fileStorageService;
     private final ClassificationApi classificationApi;
+    private final RoutingOfferRepository offers;
     private final TransactionTemplate transactionTemplate;
 
     public PickupService(PickupRepository pickups,
                          PartnerRepository partners,
                          RewardLedgerRepository ledger,
-                         NotificationService notifications,
                          AuditService audit,
                          ApplicationEventPublisher events,
                          DeviceRepository devices,
                          FileStorageService fileStorageService,
                          ClassificationApi classificationApi,
+                         RoutingOfferRepository offers,
                          PlatformTransactionManager transactionManager) {
         this.pickups = pickups;
         this.partners = partners;
         this.ledger = ledger;
-        this.notifications = notifications;
         this.audit = audit;
         this.events = events;
         this.devices = devices;
         this.fileStorageService = fileStorageService;
         this.classificationApi = classificationApi;
+        this.offers = offers;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
     @Transactional
-    public PickupRequest createPickup(UUID userId, UUID deviceId, String address, Instant scheduledAt) {
-        if (deviceId == null) {
+    public PickupRequest createPickup(ActorContext actor, CreatePickup request) {
+        if (actor == null || (!actor.isHousehold() && !actor.isAdmin())) {
+            throw new AccessDeniedException("Only households can create pickups");
+        }
+        if (request == null || request.deviceId() == null) {
             throw new IllegalArgumentException("Device ID is required");
         }
 
-        Device device = devices.findById(deviceId)
+        Device device = devices.findById(request.deviceId())
             .orElseThrow(() -> new NoSuchElementException("Device not found"));
 
-        if (!userId.equals(device.getUserId())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Device does not belong to this user");
+        if (!actor.isAdmin() && !actor.userId().equals(device.getUserId())) {
+            throw new AccessDeniedException("Device does not belong to this user");
         }
 
-        if (pickups.findActiveByDeviceId(deviceId).isPresent()) {
+        if (pickups.findActiveByDeviceId(request.deviceId()).isPresent()) {
             throw new IllegalStateException("Device already has an active pickup request");
         }
 
-        PickupRequest pickup = new PickupRequest(userId, deviceId, address != null ? address.trim() : "");
-        if (scheduledAt != null) {
-            pickup.setScheduledAt(scheduledAt);
+        PickupRequest pickup = new PickupRequest(actor.userId(), request.deviceId(),
+            request.address() != null ? request.address().trim() : "");
+        if (request.scheduledAt() != null) {
+            pickup.setScheduledAt(request.scheduledAt());
         }
         pickup.setCreatedAt(Instant.now());
         pickup.setUpdatedAt(Instant.now());
@@ -98,11 +104,16 @@ public class PickupService {
         return pickup;
     }
 
-    public PickupWithDevice submitHouseholdPickup(UUID userId,
+    public PickupWithDevice submitHouseholdPickup(ActorContext actor,
                                                   MultipartFile image,
                                                   String condition,
                                                   String address,
                                                   Instant scheduledAt) throws IOException {
+        if (actor == null || (!actor.isHousehold() && !actor.isAdmin())) {
+            throw new AccessDeniedException("Only households can submit pickups");
+        }
+
+        UUID userId = actor.userId();
         FileStorageService.StoredFile stored = fileStorageService.storeFile(userId, "devices", image, false);
         String mime = stored.metadata().getContentType();
         String imageUrl = stored.publicUri();
@@ -156,49 +167,62 @@ public class PickupService {
     }
 
     @Transactional
-    public PickupRequest cancelPickup(UUID userId, UUID pickupId) {
-        PickupRequest p = pickups.findByIdAndUserId(pickupId, userId)
+    public PickupRequest cancelOwnedPickup(ActorContext actor, UUID pickupId) {
+        PickupRequest p = pickups.findById(pickupId)
             .orElseThrow(() -> new NoSuchElementException("Pickup not found"));
-        if (!Set.of("pending", "accepted").contains(p.getStatus())) {
-            throw new IllegalStateException("Invalid pickup state transition");
+        p.cancelBy(actor);
+        return pickups.save(p);
+    }
+
+    @Transactional
+    public PickupRequest cancelOwnedPickupByDevice(ActorContext actor, UUID deviceId) {
+        if (actor == null || (!actor.isHousehold() && !actor.isAdmin())) {
+            throw new AccessDeniedException("Only households can cancel their pickups");
         }
-        p.setStatus("cancelled");
-        p.setUpdatedAt(Instant.now());
-        PickupRequest saved = pickups.save(p);
-        events.publishEvent(new PickupCancelledEvent(saved.getId()));
-        return saved;
-    }
-
-    @Transactional
-    public PickupRequest cancelPickupByDevice(UUID userId, UUID deviceId) {
-        PickupRequest pickup = pickups.findActiveByUserIdAndDeviceId(userId, deviceId)
+        PickupRequest pickup = pickups.findActiveByUserIdAndDeviceId(actor.userId(), deviceId)
             .orElseThrow(() -> new NoSuchElementException("No active pickup found for this device"));
-        pickup.setStatus("cancelled");
-        pickup.setUpdatedAt(Instant.now());
-        PickupRequest saved = pickups.save(pickup);
-        events.publishEvent(new PickupCancelledEvent(saved.getId()));
-        return saved;
-    }
-
-    @Transactional
-    public PickupRequest complete(UUID userId, UUID pickupId) {
-        PickupRequest pickup = pickups.findByIdAndUserId(pickupId, userId)
-            .orElseThrow(() -> new NoSuchElementException("Pickup not found"));
-        return completeAcceptedPickup(pickup, userId, "household");
+        pickup.cancelBy(actor);
+        return pickups.save(pickup);
     }
 
     @Transactional(timeout = 5)
-    public PickupRequest acceptByPartnerUser(UUID partnerUserId, UUID pickupId) {
-        Partner partner = requirePartner(partnerUserId);
-        if (!"approved".equalsIgnoreCase(partner.getStatus())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Partner is not approved");
+    public PickupRequest acceptOfferedPickup(ActorContext actor, UUID pickupId, UUID offerId) {
+        if (actor == null || !actor.isPartner()) {
+            throw new AccessDeniedException("Only approved partners can accept pickups");
+        }
+        if (offerId == null) {
+            throw new AccessDeniedException("Offer ID is required to accept pickup");
         }
 
+        Partner partner = requirePartner(actor.userId());
+
+        // Lock the contested pickup before a partner's individual offer.  That way a
+        // competing acceptor cannot hold a losing offer while the winner's routing
+        // event supersedes it, which otherwise creates a lock cycle.
+        PickupRequest pickup = pickups.findByIdForUpdate(pickupId)
+            .orElseThrow(() -> new NoSuchElementException("Pickup not found"));
+
         Partner lockedPartner = partners.findByIdForUpdate(partner.getId())
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN,
-                "Partner profile not found during lock acquisition"));
+            .orElseThrow(() -> new AccessDeniedException("Partner profile not found during lock acquisition"));
         if (!"approved".equalsIgnoreCase(lockedPartner.getStatus())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Partner is not approved");
+            throw new AccessDeniedException("Partner is not approved");
+        }
+
+        RoutingOffer offer = offers.findByIdAndPartnerIdForUpdate(offerId, lockedPartner.getId())
+            .orElseThrow(() -> new AccessDeniedException("Offer not found"));
+
+        if (!pickupId.equals(offer.getPickupId())) {
+            throw new IllegalStateException("Offer is not for this pickup");
+        }
+
+        if (offer.getExpiresAt() != null && offer.getExpiresAt().isBefore(Instant.now())) {
+            offer.setStatus("expired");
+            offers.save(offer);
+            throw new IllegalStateException("Offer has expired");
+        }
+
+        if (!"offered".equalsIgnoreCase(offer.getStatus())) {
+            throw new IllegalStateException("Offer is no longer available (current status: " + offer.getStatus() + ")");
         }
 
         long activeJobs = pickups.countActiveJobsByPartnerId(lockedPartner.getId());
@@ -206,123 +230,120 @@ public class PickupService {
             throw new IllegalStateException("Partner has reached maximum active capacity");
         }
 
-        PickupRequest pickup = pickups.findByIdForUpdate(pickupId)
-            .orElseThrow(() -> new NoSuchElementException("Pickup not found"));
+        pickup.acceptBy(actor.withPartnerId(lockedPartner.getId()), offer);
 
-        if (!"pending".equals(pickup.getStatus())) {
-            throw new IllegalStateException("Pickup is no longer pending (current: " + pickup.getStatus() + ")");
-        }
+        offer.setStatus("accepted");
+        offers.save(offer);
 
-        pickup.setPartnerId(lockedPartner.getId());
-        pickup.setStatus("accepted");
-        pickup.setUpdatedAt(Instant.now());
-        PickupRequest saved = pickups.save(pickup);
-        events.publishEvent(new PickupAcceptedEvent(saved.getId(), lockedPartner.getId()));
-        return saved;
-    }
-
-    @Transactional
-    public PickupRequest rejectByPartnerUser(UUID partnerUserId, UUID pickupId) {
-        Partner partner = requirePartner(partnerUserId);
-        PickupRequest pickup = pickups.findByIdForUpdate(pickupId)
-            .orElseThrow(() -> new NoSuchElementException("Pickup not found"));
-
-        if (!partner.getId().equals(pickup.getPartnerId())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                "Pickup is not assigned to this partner");
-        }
-
-        if (!Set.of("accepted", "in_progress").contains(pickup.getStatus())) {
-            throw new IllegalStateException("Invalid pickup state transition");
-        }
-
-        // Return pickup back to pending and clear partner assignment
-        pickup.setStatus("pending");
-        pickup.setPartnerId(null);
-        pickup.setUpdatedAt(Instant.now());
-        PickupRequest saved = pickups.save(pickup);
-
-        // Re-publish pickup event so other candidate partners can receive offers
-        events.publishEvent(new PickupCreatedEvent(saved.getId()));
-        return saved;
-    }
-
-    @Transactional
-    public PickupRequest completeForPartner(UUID partnerId, UUID pickupId) {
-        PickupRequest pickup = pickups.findByIdForUpdate(pickupId)
-            .orElseThrow(() -> new NoSuchElementException("Pickup not found"));
-        if (!partnerId.equals(pickup.getPartnerId())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                "Pickup is not assigned to this partner");
-        }
-        return completeAcceptedPickup(pickup, pickup.getUserId(), "partner");
-    }
-
-    @Transactional
-    public PickupRequest completeForPartnerUser(UUID partnerUserId, UUID pickupId) {
-        Partner partner = requirePartner(partnerUserId);
-        return completeForPartner(partner.getId(), pickupId);
-    }
-
-    @Transactional
-    public PickupRequest verifyForPartner(UUID partnerUserId, UUID pickupId,
-                                           String category, String condition, String notes,
-                                           String evidenceUrl) {
-        Partner partner = requirePartner(partnerUserId);
-        PickupRequest pickup = pickups.findByIdForUpdate(pickupId)
-            .orElseThrow(() -> new NoSuchElementException("Pickup not found"));
-
-        if (!partner.getId().equals(pickup.getPartnerId())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                "Pickup is not assigned to this partner");
-        }
-        if (!Set.of("accepted", "in_progress").contains(pickup.getStatus())) {
-            throw new IllegalStateException("Pickup must be accepted or in progress before verification");
-        }
-
-        pickup.verify(category, condition, notes, evidenceUrl, partner.getId());
         return pickups.save(pickup);
+    }
+
+    @Transactional
+    public PickupRequest rejectAssignedPickup(ActorContext actor, UUID pickupId, String reason) {
+        if (actor == null || !actor.isPartner()) {
+            throw new AccessDeniedException("Only assigned partner can reject pickup");
+        }
+        Partner partner = requirePartner(actor.userId());
+        PickupRequest pickup = pickups.findByIdForUpdate(pickupId)
+            .orElseThrow(() -> new NoSuchElementException("Pickup not found"));
+
+        pickup.rejectBy(actor.withPartnerId(partner.getId()), reason);
+        return pickups.save(pickup);
+    }
+
+    @Transactional
+    public PickupRequest verifyAssignedPickup(ActorContext actor, UUID pickupId, VerifyRequest request) {
+        if (actor == null || !actor.isPartner()) {
+            throw new AccessDeniedException("Only assigned partner can verify pickup");
+        }
+        Partner partner = requirePartner(actor.userId());
+        PickupRequest pickup = pickups.findByIdForUpdate(pickupId)
+            .orElseThrow(() -> new NoSuchElementException("Pickup not found"));
+
+        pickup.verifyBy(actor.withPartnerId(partner.getId()), request);
+        return pickups.save(pickup);
+    }
+
+    @Transactional
+    public PickupRequest completeAssignedPickup(ActorContext actor, UUID pickupId) {
+        if (actor == null || !actor.isPartner()) {
+            throw new AccessDeniedException("Only assigned partner can complete pickup");
+        }
+        Partner partner = requirePartner(actor.userId());
+        PickupRequest pickup = pickups.findByIdForUpdate(pickupId)
+            .orElseThrow(() -> new NoSuchElementException("Pickup not found"));
+
+        boolean alreadyCompleted = "completed".equals(pickup.getStatus());
+        pickup.completeBy(actor.withPartnerId(partner.getId()));
+        PickupRequest saved = pickups.save(pickup);
+
+        if (!alreadyCompleted) {
+            UUID householdId = pickup.getUserId();
+            try {
+                if (ledger.findByUserIdAndReferenceId(householdId, pickup.getId()).isEmpty()) {
+                    ledger.save(new RewardLedger(householdId, 25, "earn",
+                        "Pickup completed reward", pickup.getId()));
+                }
+            } catch (DataIntegrityViolationException ex) {
+                log.info("Reward already awarded for pickup: {}", pickup.getId());
+            }
+            // Completion notification is owned by NotificationListener on PickupCompletedEvent
+            // so households do not receive a duplicate row from this service path.
+
+            audit.record(householdId, "partner", "pickup.completed",
+                "pickup", pickup.getId(), "success");
+        }
+
+        return saved;
+    }
+
+    @Transactional
+    public PickupRequest reassignPickup(ActorContext actor, UUID pickupId, UUID newPartnerId) {
+        if (actor == null || !actor.isAdmin()) {
+            throw new AccessDeniedException("Only admins can reassign pickups");
+        }
+        if (newPartnerId == null) {
+            throw new IllegalArgumentException("newPartnerId is required");
+        }
+
+        PickupRequest pickup = pickups.findByIdForUpdate(pickupId)
+            .orElseThrow(() -> new NoSuchElementException("Pickup not found"));
+
+        UUID previousPartnerId = pickup.getPartnerId();
+        // A client retry after a committed reassignment is a no-op.  In particular,
+        // it must not create another event or notification.
+        if (newPartnerId.equals(previousPartnerId)) {
+            return pickup;
+        }
+
+        Partner targetPartner = partners.findByIdForUpdate(newPartnerId)
+            .orElseThrow(() -> new NoSuchElementException("Target partner not found"));
+
+        if (!"approved".equalsIgnoreCase(targetPartner.getStatus())) {
+            throw new IllegalStateException("Target partner is not approved");
+        }
+
+        long activeJobs = pickups.countActiveJobsByPartnerId(targetPartner.getId());
+        if (activeJobs >= targetPartner.getCapacity()) {
+            throw new IllegalStateException("Target partner has reached maximum active capacity");
+        }
+
+        pickup.reassignBy(actor, targetPartner.getId());
+        PickupRequest saved = pickups.save(pickup);
+
+        audit.record(actor.userId(), "ADMIN", "pickup.reassigned",
+            "pickup", saved.getId(), "success");
+
+        return saved;
     }
 
     private Partner requirePartner(UUID partnerUserId) {
         Partner partner = partners.findByUserId(partnerUserId)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN,
-                "Partner profile not found"));
+            .orElseThrow(() -> new AccessDeniedException("Partner profile not found"));
         if (!"approved".equalsIgnoreCase(partner.getStatus())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Partner is not approved");
+            throw new AccessDeniedException("Partner is not approved");
         }
         return partner;
-    }
-
-    private PickupRequest completeAcceptedPickup(PickupRequest pickup, UUID householdId,
-                                                  String actorRole) {
-        if ("completed".equals(pickup.getStatus())) {
-            return pickup;
-        }
-
-        if (!Set.of("accepted", "in_progress", "verified").contains(pickup.getStatus())) {
-            throw new IllegalStateException("Pickup must be accepted, in progress, or verified before completion");
-        }
-
-        pickup.setStatus("completed");
-        pickup.setCompletedAt(Instant.now());
-        pickup.setUpdatedAt(Instant.now());
-        PickupRequest saved = pickups.save(pickup);
-
-        try {
-            if (ledger.findByUserIdAndReferenceId(householdId, pickup.getId()).isEmpty()) {
-                ledger.save(new RewardLedger(householdId, 25, "earn",
-                    "Pickup completed reward", pickup.getId()));
-                notifications.create(householdId, "pickup_completed",
-                    "Pickup completed", "You earned 25 points");
-            }
-        } catch (DataIntegrityViolationException ex) {
-            log.info("Reward already awarded for pickup: {}", pickup.getId());
-        }
-
-        audit.record(householdId, actorRole, "pickup.completed",
-            "pickup", pickup.getId(), "success");
-        return saved;
     }
 
     public PickupWithDevice enrich(PickupRequest pickup) {

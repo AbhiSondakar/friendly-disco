@@ -7,18 +7,14 @@ services:
     ports:
       - "${PORT:-8090}:8090"
     environment:
-      # These will be automatically injected from your .env file on the host
-      SPRING_DATASOURCE_URL: ${DATABASE_URL}
-      SPRING_DATASOURCE_USERNAME: ${DATABASE_USERNAME}
-      SPRING_DATASOURCE_PASSWORD: ${DATABASE_PASSWORD}
-      REDIS_URL: ${REDIS_URL}
+      # The database and Redis are managed external services. Required
+      # interpolation fails fast when a local .env has not been configured.
+      SPRING_DATASOURCE_URL: ${DATABASE_URL:?DATABASE_URL must be set}
+      SPRING_DATASOURCE_USERNAME: ${DATABASE_USERNAME:?DATABASE_USERNAME must be set}
+      SPRING_DATASOURCE_PASSWORD: ${DATABASE_PASSWORD:?DATABASE_PASSWORD must be set}
+      REDIS_URL: ${REDIS_URL:?REDIS_URL must be set}
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
       ADMIN_EMAIL: ${ADMIN_EMAIL}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       ROBOFLOW_API_KEY: ${ROBOFLOW_API_KEY}
       ROBOFLOW_MODEL_ID: ${ROBOFLOW_MODEL_ID:-e-waste-qmxtt-zuyip/1}
-    volumes:
-      - ecoloop-uploads:/app/uploads
-
-volumes:
-  ecoloop-uploads:

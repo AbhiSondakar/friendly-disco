@@ -12,6 +12,8 @@ public final class PasswordPolicy {
 
     private static final Set<String> FORBIDDEN_PASSWORDS = Set.of(
         "admin@123",
+        "admin@123456",
+        "admin123456",
         "password@123",
         "admin12345678",
         "password12345",

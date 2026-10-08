@@ -23,24 +23,34 @@ public class RewardService {
     }
 
     @Transactional
-    public Redemption redeem(UUID userId, UUID rewardId, int requestedCost) {
-        users.findLockedById(userId)
+    public Redemption redeem(UUID userId, UUID rewardId) {
+        var user = users.findLockedById(userId)
             .orElseThrow(() -> new IllegalArgumentException("User not found"));
+        if (!user.isEmailVerified()) {
+            throw new IllegalStateException("Email must be verified before redeeming rewards");
+        }
         var item = catalog.findById(rewardId)
             .orElseThrow(() -> new IllegalArgumentException("Reward not found"));
-        if (!item.isActive() || item.getPointsCost() != requestedCost) {
+        if (!item.isActive()) {
             throw new IllegalArgumentException("Invalid reward");
         }
+        int pointsCost = item.getPointsCost();
         int balance = ledger.balance(userId);
-        if (balance < item.getPointsCost()) {
+        if (balance < pointsCost) {
             throw new IllegalStateException("Insufficient points");
         }
-        var redemption = new Redemption(userId, item.getId(), item.getPointsCost());
+        var redemption = new Redemption(userId, item.getId(), pointsCost);
         redemption.setCreatedAt(Instant.now());
         redemption.setStatus("completed");
         var saved = redemptions.save(redemption);
-        ledger.save(new RewardLedger(userId, -item.getPointsCost(), "redeem",
+        ledger.save(new RewardLedger(userId, -pointsCost, "redeem",
             "Redeemed: " + item.getName(), saved.getId()));
         return saved;
+    }
+
+    @Deprecated
+    @Transactional
+    public Redemption redeem(UUID userId, UUID rewardId, int requestedCost) {
+        return redeem(userId, rewardId);
     }
 }

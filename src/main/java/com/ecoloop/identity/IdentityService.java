@@ -25,6 +25,9 @@ public class IdentityService implements UserDetailsService {
         String normalized = User.normalizeEmail(email);
         User u = users.findByEmailIgnoreCase(normalized).orElseThrow(() ->
             new UsernameNotFoundException("User not found"));
+        if (u.isDeleted()) {
+            throw new UsernameNotFoundException("User not found");
+        }
         return UserPrincipal.from(u);
     }
 
@@ -32,12 +35,18 @@ public class IdentityService implements UserDetailsService {
         String normalized = User.normalizeEmail(email);
         User u = users.findByEmailIgnoreCase(normalized).orElseThrow(() ->
             new UsernameNotFoundException("User not found"));
+        if (u.isDeleted()) {
+            throw new UsernameNotFoundException("User not found");
+        }
         return toDto(u);
     }
 
     public UserDto findById(UUID id) {
         User u = users.findById(id).orElseThrow(() ->
             new UsernameNotFoundException("User not found: " + id));
+        if (u.isDeleted()) {
+            throw new UsernameNotFoundException("User not found: " + id);
+        }
         return toDto(u);
     }
 

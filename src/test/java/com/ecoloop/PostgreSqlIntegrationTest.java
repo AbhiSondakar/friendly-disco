@@ -56,9 +56,25 @@ public class PostgreSqlIntegrationTest {
     @Autowired
     private RewardLedgerRepository rewardLedgerRepository;
 
+    @Autowired
+    private com.ecoloop.identity.PushTokenRepository pushTokenRepository;
+
+    @Autowired
+    private jakarta.persistence.EntityManager entityManager;
+
     @Test
     void postgresBootstrapAndFlywayValidated() {
         assertNotNull(userRepository);
+    }
+
+    @Test
+    void pickupStatusConstraintRejectsRemovedInProgressState() {
+        User user = userRepository.saveAndFlush(new User(
+            "pickup-state." + UUID.randomUUID() + "@ecoloop.test", "hash", "State test", "HOUSEHOLD"));
+        PickupRequest pickup = new PickupRequest(user.getId(), null, "1 State Way");
+        pickup.setStatus("in_progress");
+
+        assertThrows(DataIntegrityViolationException.class, () -> pickupRepository.saveAndFlush(pickup));
     }
 
     @Test
@@ -84,5 +100,92 @@ public class PostgreSqlIntegrationTest {
         assertThrows(DataIntegrityViolationException.class, () -> {
             rewardLedgerRepository.saveAndFlush(r2);
         });
+    }
+
+    @Test
+    void partialUniquePhoneAllowsMultipleNullsButRejectsDuplicateNonNull() {
+        // Multiple users with null phone must succeed
+        User u1 = new User("nullphone1@ecoloop.test", "hash", "Null Phone 1", "HOUSEHOLD");
+        u1.setPhone(null);
+        userRepository.saveAndFlush(u1);
+
+        User u2 = new User("nullphone2@ecoloop.test", "hash", "Null Phone 2", "HOUSEHOLD");
+        u2.setPhone(null);
+        userRepository.saveAndFlush(u2);
+
+        // First user with phone succeeds
+        String phone = "+12065550199";
+        User u3 = new User("phone1@ecoloop.test", "hash", "Phone 1", "HOUSEHOLD");
+        u3.setPhone(phone);
+        userRepository.saveAndFlush(u3);
+
+        // Second user with same non-null phone must be rejected by uq_users_phone
+        User u4 = new User("phone2@ecoloop.test", "hash", "Phone 2", "HOUSEHOLD");
+        u4.setPhone(phone);
+        assertThrows(DataIntegrityViolationException.class, () -> {
+            userRepository.saveAndFlush(u4);
+        });
+    }
+
+    @Test
+    void pushTokensTokenUniquenessRejectsDuplicateAcrossUsers() {
+        String token = "push-token-" + UUID.randomUUID();
+        User u1 = userRepository.saveAndFlush(new User("push1." + UUID.randomUUID() + "@ecoloop.test", "hash", "P1", "HOUSEHOLD"));
+        User u2 = userRepository.saveAndFlush(new User("push2." + UUID.randomUUID() + "@ecoloop.test", "hash", "P2", "HOUSEHOLD"));
+
+        pushTokenRepository.saveAndFlush(new com.ecoloop.identity.PushToken(u1.getId(), token, "ios"));
+
+        // Second user registering identical push token must be rejected by uq_push_tokens_token
+        assertThrows(DataIntegrityViolationException.class, () -> {
+            pushTokenRepository.saveAndFlush(new com.ecoloop.identity.PushToken(u2.getId(), token, "android"));
+        });
+    }
+
+    @Test
+    void foreignKeyOnDeleteRestrictPreventsDeletingUserWithRewardLedger() {
+        User u = userRepository.saveAndFlush(new User("restrict.ledger." + UUID.randomUUID() + "@ecoloop.test", "hash", "R1", "HOUSEHOLD"));
+        rewardLedgerRepository.saveAndFlush(new RewardLedger(u.getId(), 50, "earn", "Points", UUID.randomUUID()));
+
+        // Deleting user must fail due to fk_reward_ledger_user ON DELETE RESTRICT
+        assertThrows(DataIntegrityViolationException.class, () -> {
+            userRepository.deleteById(u.getId());
+            userRepository.flush();
+        });
+    }
+
+    @Test
+    void foreignKeyOnDeleteRestrictPreventsDeletingUserWithPickupRequests() {
+        User u = userRepository.saveAndFlush(new User("restrict.pickup." + UUID.randomUUID() + "@ecoloop.test", "hash", "R2", "HOUSEHOLD"));
+        PickupRequest pickup = new PickupRequest(u.getId(), null, "123 Green Way");
+        pickupRepository.saveAndFlush(pickup);
+
+        // Deleting user must fail due to fk_pickup_requests_user ON DELETE RESTRICT
+        assertThrows(DataIntegrityViolationException.class, () -> {
+            userRepository.deleteById(u.getId());
+            userRepository.flush();
+        });
+    }
+
+    @Test
+    void instantPersistedToTimestamptzPreservesMillisecondPrecisionOnPostgres() {
+        Instant pinnedInstant = Instant.parse("2026-10-08T15:30:45.678Z");
+
+        User user = new User("timestamptz.pg." + UUID.randomUUID() + "@ecoloop.test", "hash", "Timestamp User PG", "HOUSEHOLD");
+        user.setCreatedAt(pinnedInstant);
+        user.setUpdatedAt(pinnedInstant);
+
+        User saved = userRepository.saveAndFlush(user);
+        assertNotNull(saved.getId());
+
+        entityManager.clear();
+
+        User reloaded = userRepository.findById(saved.getId()).orElseThrow();
+        assertNotNull(reloaded.getCreatedAt());
+
+        assertEquals(pinnedInstant.toEpochMilli(), reloaded.getCreatedAt().toEpochMilli(),
+                "Persisted Instant to PostgreSQL TIMESTAMPTZ must round-trip with exact millisecond epoch equality");
+        assertEquals(pinnedInstant.truncatedTo(java.time.temporal.ChronoUnit.MILLIS),
+                reloaded.getCreatedAt().truncatedTo(java.time.temporal.ChronoUnit.MILLIS),
+                "Persisted Instant must match original truncated to milliseconds on Postgres");
     }
 }

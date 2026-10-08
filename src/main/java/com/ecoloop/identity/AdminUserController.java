@@ -1,5 +1,6 @@
 package com.ecoloop.identity;
 
+import com.ecoloop.common.security.Role;
 import com.ecoloop.common.web.PageResponse;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -14,6 +15,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/admin/users")
 @PreAuthorize("hasRole('ADMIN')")
+@org.springframework.validation.annotation.Validated
 public class AdminUserController {
 
     public record RoleUpdate(String role) {}
@@ -33,8 +35,8 @@ public class AdminUserController {
     @PreAuthorize("hasRole('ADMIN')")
     @GetMapping
     public PageResponse<IdentityService.UserDto> list(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "0") @jakarta.validation.constraints.Min(0) int page,
+            @RequestParam(defaultValue = "20") @jakarta.validation.constraints.Min(1) @jakarta.validation.constraints.Max(200) int size,
             @RequestParam(required = false) String role,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String search) {
@@ -48,16 +50,12 @@ public class AdminUserController {
             }
         }
 
-        Specification<User> spec = Specification.where(UserSpecifications.withRole(role))
+        Specification<User> spec = Specification.where(UserSpecifications.notDeleted())
+                .and(UserSpecifications.withRole(role))
                 .and(UserSpecifications.withActive(active))
                 .and(UserSpecifications.withSearch(search));
 
-        PageRequest pageable = PageRequest.of(
-                Math.max(0, page),
-                Math.min(Math.max(1, size), 100),
-                Sort.by(Sort.Direction.DESC, "createdAt")
-        );
-
+        PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         return PageResponse.of(users.findAll(spec, pageable)).mapContent(identity::toDto);
     }
 
@@ -78,11 +76,14 @@ public class AdminUserController {
     public IdentityService.UserDto changeRole(@PathVariable UUID id, @RequestBody RoleUpdate body) {
         var user = users.findById(id).orElseThrow(() ->
             new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+        if (user.isDeleted()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found");
+        }
         if (body == null || body.role() == null || body.role().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Role is required");
         }
         try {
-            user.setRole(User.Role.valueOf(body.role().trim().toUpperCase()).name());
+            user.setRole(Role.valueOf(body.role().trim().toUpperCase()).name());
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid role");
         }
@@ -94,6 +95,12 @@ public class AdminUserController {
     private IdentityService.UserDto change(UUID id, boolean active) {
         var user = users.findById(id).orElseThrow(() ->
             new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+        if (user.isDeleted()) {
+            if (active) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "Cannot reactivate a soft-deleted user");
+            }
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found");
+        }
         user.setActive(active);
         User saved = users.save(user);
         sessionRevocationService.revokeAllUserSessions(saved.getEmail());

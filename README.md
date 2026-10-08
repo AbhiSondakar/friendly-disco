@@ -4,9 +4,24 @@ Spring Boot 3.3 / Java 21 monolith for e-waste collection. Authentication is **s
 
 ## Run locally
 
+`docker compose` intentionally starts only the backend. PostgreSQL and Redis are external managed services, so create an uncommitted `.env` file before starting it:
+
+```dotenv
+DATABASE_URL=jdbc:postgresql://host.docker.internal:5432/ecoloop
+DATABASE_USERNAME=ecoloop
+DATABASE_PASSWORD=replace-me
+REDIS_URL=redis://host.docker.internal:6379
+COOKIE_SECURE=false
+```
+
+When PostgreSQL or Redis run in another Docker Compose project, replace `host.docker.internal` with the reachable service hostname/network address. The Compose file fails fast if any database or Redis value is missing; it does not silently create an incomplete local stack.
+
 ```bash
 docker compose up -d --build
+docker compose ps
 ```
+
+After both external services are reachable, verify `http://localhost:8090/actuator/health`. New uploaded files live in PostgreSQL, so Compose deliberately has no uploads volume.
 
 The server binds to `0.0.0.0:8090` by default so a phone on the same LAN can reach it.
 API from the development computer: `http://localhost:8090`  |  OpenAPI: `http://localhost:8090/swagger-ui.html`
@@ -38,6 +53,8 @@ The response should be reachable even though protected API endpoints still requi
 Images with no usable model prediction are saved as `other` with database status `manual` for manual review; inference failures are still rejected.
 
 No bearer-token configuration is required. Session expiry defaults to seven days and login rotates the session ID to prevent fixation.
+
+Login is CSRF-protected. Browser and Android clients first call `GET /api/auth/csrf` and send the returned `X-XSRF-TOKEN` value on every mutating request, including `POST /api/auth/login`.
 
 The admin web frontend calls the API cross-origin with session cookies. Cross-site session cookies require HTTPS, `COOKIE_SECURE=true`, and `COOKIE_SAME_SITE=none`. Add the frontend's exact origin to `CORS_ALLOWED_ORIGINS` in the backend deployment environment; do not include a path or trailing slash. After changing backend environment values, redeploy the service. In browser developer tools, confirm `/api/auth/login` succeeds, the `ECOLOOP_SESSION` cookie is accepted, and the following `/api/auth/me` request sends that cookie and returns role `ADMIN`.
 

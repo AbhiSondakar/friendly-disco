@@ -1,13 +1,17 @@
 package com.ecoloop.partner;
 
+import com.ecoloop.common.security.ActorContext;
 import com.ecoloop.common.SessionUser;
 import com.ecoloop.common.upload.FileStorageService;
 import com.ecoloop.identity.IdentityService;
+import com.ecoloop.identity.User;
 import com.ecoloop.identity.UserRepository;
 import com.ecoloop.pickup.PickupRepository;
 import com.ecoloop.pickup.PickupRequest;
 import com.ecoloop.pickup.PickupService;
+import com.ecoloop.pickup.VerifyRequest;
 import com.ecoloop.routing.RoutingOffer;
+import com.ecoloop.routing.RoutingOfferDto;
 import com.ecoloop.routing.RoutingOfferRepository;
 import com.ecoloop.routing.RoutingService;
 import com.ecoloop.rewards.RewardLedgerRepository;
@@ -68,6 +72,11 @@ public class PartnerController {
     @PostMapping
     public PartnerDto register(@Valid @RequestBody Registration body, HttpServletRequest request) {
         var sessionUser = SessionUser.require(request);
+        User user = users.findById(sessionUser.id())
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found"));
+        if (!user.isEmailVerified()) {
+            throw new IllegalStateException("Email must be verified before registering as a partner");
+        }
         if (partners.findByUserId(sessionUser.id()).isPresent()) {
             throw new IllegalStateException("Partner profile already exists");
         }
@@ -98,9 +107,11 @@ public class PartnerController {
 
     @GetMapping("/offers")
     @PreAuthorize("hasRole('PARTNER')")
-    public List<RoutingOffer> offers(HttpServletRequest request) {
+    public List<RoutingOfferDto> offers(HttpServletRequest request) {
         Partner partner = currentPartner(request);
-        return offers.findAllByPartnerIdOrderByCreatedAtDesc(partner.getId());
+        return offers.findAllByPartnerIdOrderByCreatedAtDesc(partner.getId()).stream()
+            .map(RoutingOfferDto::from)
+            .toList();
     }
 
     @GetMapping("/jobs")
@@ -135,12 +146,15 @@ public class PartnerController {
     }
 
     @GetMapping("/{id}")
-    public PartnerDto get(@PathVariable UUID id, HttpServletRequest request) {
+    public Object get(@PathVariable UUID id, HttpServletRequest request) {
         SessionUser user = SessionUser.require(request);
         Partner partner = partners.findById(id)
             .orElseThrow(() -> new NoSuchElementException("Partner not found"));
         boolean canSeeSensitive = "ADMIN".equalsIgnoreCase(user.role()) || user.id().equals(partner.getUserId());
-        return PartnerDto.from(partner, canSeeSensitive);
+        if (canSeeSensitive) {
+            return PartnerDto.from(partner, true);
+        }
+        return PartnerPublicDto.from(partner);
     }
 
     @GetMapping("/kpis")
@@ -148,8 +162,8 @@ public class PartnerController {
     public Map<String, Object> kpis(HttpServletRequest request) {
         Partner partner = currentPartner(request);
         UUID partnerId = partner.getId();
-        Instant today = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.DAYS);
-        Instant monthStart = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MONTHS);
+        Instant today = java.time.LocalDate.now(java.time.ZoneOffset.UTC).atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
+        Instant monthStart = java.time.LocalDate.now(java.time.ZoneOffset.UTC).withDayOfMonth(1).atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
 
         long offersToday = offers.findAllByPartnerIdOrderByCreatedAtDesc(partnerId).stream()
             .filter(o -> o.getCreatedAt().isAfter(today)).count();
@@ -157,6 +171,7 @@ public class PartnerController {
         long monthlyCompletions = pickups.findAllByPartnerId(partnerId).stream()
             .filter(p -> "completed".equals(p.getStatus()))
             .filter(p -> p.getCompletedAt() != null && p.getCompletedAt().isAfter(monthStart))
+            .filter(p -> users.findById(p.getUserId()).map(u -> !u.isDeleted()).orElse(false))
             .count();
         int pointsBalance = ledger.balance(partner.getUserId());
         Instant nextOfferAt = offers.findAllByPartnerIdOrderByCreatedAtDesc(partnerId).stream()
@@ -191,43 +206,47 @@ public class PartnerController {
 
     @PostMapping("/offers/{id}/accept")
     @PreAuthorize("hasRole('PARTNER')")
-    public RoutingOffer acceptOffer(@PathVariable UUID id, HttpServletRequest request) {
-        return routingService.acceptOffer(SessionUser.require(request).id(), id);
+    public RoutingOfferDto acceptOffer(@PathVariable UUID id, ActorContext actor) {
+        return RoutingOfferDto.from(routingService.acceptOffer(actor.userId(), id));
     }
 
     @PostMapping("/offers/{id}/reject")
     @PreAuthorize("hasRole('PARTNER')")
-    public RoutingOffer rejectOffer(@PathVariable UUID id,
-                                    @RequestBody(required = false) Map<String, String> body,
-                                    HttpServletRequest request) {
+    public RoutingOfferDto rejectOffer(@PathVariable UUID id,
+                                       @RequestBody(required = false) Map<String, String> body,
+                                       HttpServletRequest request) {
         String reason = body != null ? body.get("reason") : null;
-        return routingService.rejectOffer(SessionUser.require(request).id(), id, reason);
+        return RoutingOfferDto.from(routingService.rejectOffer(SessionUser.require(request).id(), id, reason));
     }
 
     @PostMapping("/jobs/{id}/verify")
     @PreAuthorize("hasRole('PARTNER')")
     public com.ecoloop.pickup.PickupWithDevice verifyJob(@PathVariable UUID id,
                                                          @RequestBody Map<String, Object> body,
-                                                         HttpServletRequest request) {
+                                                         ActorContext actor) {
         String category = body.get("category") != null ? body.get("category").toString() : null;
         String condition = body.get("condition") != null ? body.get("condition").toString() : null;
         String notes = body.get("notes") != null ? body.get("notes").toString() : null;
         String evidenceUrl = body.get("evidenceUrl") != null ? body.get("evidenceUrl").toString() : null;
 
-        PickupRequest pickup = pickupService.verifyForPartner(SessionUser.require(request).id(), id,
-            category, condition, notes, evidenceUrl);
+        PickupRequest pickup = pickupService.verifyAssignedPickup(actor, id,
+            new VerifyRequest(category, condition, notes, evidenceUrl));
         return pickupService.enrich(pickup);
     }
 
     @PostMapping("/jobs/{id}/complete")
     @PreAuthorize("hasRole('PARTNER')")
-    public com.ecoloop.pickup.PickupWithDevice completeJob(@PathVariable UUID id, HttpServletRequest request) {
-        Partner partner = currentPartner(request);
-        return pickupService.enrich(pickupService.completeForPartner(partner.getId(), id));
+    public com.ecoloop.pickup.PickupWithDevice completeJob(@PathVariable UUID id, ActorContext actor) {
+        return pickupService.enrich(pickupService.completeAssignedPickup(actor, id));
     }
 
     private Partner currentPartner(HttpServletRequest request) {
         var sessionUser = SessionUser.require(request);
+        User user = users.findById(sessionUser.id())
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found"));
+        if (user.isDeleted()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Account has been deactivated");
+        }
         Partner partner = partners.findByUserId(sessionUser.id())
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Partner profile not found"));
         if (!"approved".equalsIgnoreCase(partner.getStatus())) {

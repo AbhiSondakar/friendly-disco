@@ -26,6 +26,9 @@ public class RoutingOffer {
     @Column(name = "score")
     private Double score;
 
+    @Column(name = "round", nullable = false)
+    private int round = 1;
+
     @Column(name = "rejection_reason", columnDefinition = "TEXT")
     private String rejectionReason;
 
@@ -35,16 +38,26 @@ public class RoutingOffer {
     protected RoutingOffer() {}
 
     public RoutingOffer(UUID pickupId, UUID partnerId, Instant expiresAt) {
+        this(pickupId, partnerId, expiresAt, 1);
+    }
+
+    public RoutingOffer(UUID pickupId, UUID partnerId, Instant expiresAt, int round) {
         this.pickupId = pickupId;
         this.partnerId = partnerId;
         this.expiresAt = expiresAt;
+        this.round = round;
     }
 
     public RoutingOffer(UUID pickupId, UUID partnerId, Instant expiresAt, Double score) {
+        this(pickupId, partnerId, expiresAt, score, 1);
+    }
+
+    public RoutingOffer(UUID pickupId, UUID partnerId, Instant expiresAt, Double score, int round) {
         this.pickupId = pickupId;
         this.partnerId = partnerId;
         this.expiresAt = expiresAt;
         this.score = score;
+        this.round = round;
     }
 
     public UUID getId() { return id; }
@@ -59,6 +72,8 @@ public class RoutingOffer {
     public void setExpiresAt(Instant expiresAt) { this.expiresAt = expiresAt; }
     public Double getScore() { return score; }
     public void setScore(Double score) { this.score = score; }
+    public int getRound() { return round; }
+    public void setRound(int round) { this.round = round; }
     public String getRejectionReason() { return rejectionReason; }
     public void setRejectionReason(String rejectionReason) { this.rejectionReason = rejectionReason; }
     public Instant getCreatedAt() { return createdAt; }

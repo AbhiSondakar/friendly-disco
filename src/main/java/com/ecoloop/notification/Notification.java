@@ -24,7 +24,8 @@ public class Notification {
     private boolean read = false;
 
     @Column(length = 50)
-    private String type;
+    @Convert(converter = NotificationTypeConverter.class)
+    private NotificationType type;
 
     @Column(name = "reference_id")
     private UUID referenceId;
@@ -34,11 +35,20 @@ public class Notification {
 
     protected Notification() {}
 
+    @Deprecated
     public Notification(UUID userId, String type, String title, String body) {
+        this.userId = userId;
+        this.type = NotificationType.fromValue(type);
+        this.title = title;
+        this.body = body;
+    }
+
+    public Notification(UUID userId, NotificationType type, String title, String body, UUID referenceId) {
         this.userId = userId;
         this.type = type;
         this.title = title;
         this.body = body;
+        this.referenceId = referenceId;
     }
 
     public UUID getId() { return id; }
@@ -51,8 +61,9 @@ public class Notification {
     public void setBody(String body) { this.body = body; }
     public boolean isRead() { return read; }
     public void setRead(boolean read) { this.read = read; }
-    public String getType() { return type; }
-    public void setType(String type) { this.type = type; }
+    public String getType() { return type == null ? null : type.value(); }
+    public NotificationType getTypedType() { return type; }
+    public void setType(NotificationType type) { this.type = type; }
     public UUID getReferenceId() { return referenceId; }
     public void setReferenceId(UUID referenceId) { this.referenceId = referenceId; }
     public Instant getCreatedAt() { return createdAt; }

@@ -54,7 +54,8 @@ public class UserController {
             "phone", u.getPhone() != null ? u.getPhone() : "",
             "address", u.getAddress() != null ? u.getAddress() : "",
             "role", u.getRole(),
-            "pointsBalance", ledger.balance(u.getId())
+            "pointsBalance", ledger.balance(u.getId()),
+            "emailVerified", u.isEmailVerified()
         );
     }
 
@@ -90,7 +91,9 @@ public class UserController {
         u.setPasswordHash(encoder.encode(body.newPassword()));
         u.setUpdatedAt(Instant.now());
         users.save(u);
-        sessionRevocationService.revokeAllUserSessions(u.getEmail());
+        jakarta.servlet.http.HttpSession session = request.getSession(false);
+        String currentSessionId = session != null ? session.getId() : null;
+        sessionRevocationService.revokeOtherUserSessions(u.getEmail(), currentSessionId);
     }
 
     @PostMapping("/license")

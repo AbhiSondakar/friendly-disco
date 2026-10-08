@@ -25,14 +25,17 @@ public class RoutingOfferExpirationScheduler {
     private static final Logger log = LoggerFactory.getLogger(RoutingOfferExpirationScheduler.class);
 
     private final RoutingOfferRepository offers;
+    private final RoutingService routingService;
     private final TransactionTemplate transactionTemplate;
     private final int batchSize;
     private final AtomicBoolean running = new AtomicBoolean(false);
 
     public RoutingOfferExpirationScheduler(RoutingOfferRepository offers,
+                                           RoutingService routingService,
                                            PlatformTransactionManager transactionManager,
                                            @Value("${ecoloop.routing.offer-expiration.batch-size:500}") int batchSize) {
         this.offers = offers;
+        this.routingService = routingService;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.transactionTemplate.setPropagationBehaviorName("PROPAGATION_REQUIRES_NEW");
         this.batchSize = Math.max(1, batchSize);
@@ -48,7 +51,7 @@ public class RoutingOfferExpirationScheduler {
         AtomicInteger totalExpired = new AtomicInteger(0);
         try {
             while (true) {
-                Integer expiredInBatch = transactionTemplate.execute(status -> {
+                List<UUID> affectedPickupIds = transactionTemplate.execute(status -> {
                     Instant cutoff = Instant.now();
                     Slice<RoutingOffer> slice = offers.findExpiredOffersSliced(
                         cutoff, PageRequest.of(0, batchSize));
@@ -56,17 +59,28 @@ public class RoutingOfferExpirationScheduler {
                         .map(RoutingOffer::getId)
                         .toList();
                     if (ids.isEmpty()) {
-                        return -1;
+                        return java.util.Collections.emptyList();
                     }
+                    List<UUID> pickups = slice.getContent().stream()
+                        .map(RoutingOffer::getPickupId)
+                        .distinct()
+                        .toList();
                     int updated = offers.markAsExpiredInBatch(ids);
                     log.debug("Expiration job batch processed: ids={} updated={}", ids.size(), updated);
-                    return updated;
+                    return pickups;
                 });
-                if (expiredInBatch == null || expiredInBatch < 0) {
+                if (affectedPickupIds == null || affectedPickupIds.isEmpty()) {
                     break;
                 }
-                totalExpired.addAndGet(expiredInBatch);
-                if (expiredInBatch < batchSize) {
+                totalExpired.addAndGet(affectedPickupIds.size());
+                for (UUID pickupId : affectedPickupIds) {
+                    try {
+                        routingService.checkAndHandleExpiredOffers(pickupId);
+                    } catch (Exception ex) {
+                        log.error("Failed to check expired offers for pickup {}", pickupId, ex);
+                    }
+                }
+                if (affectedPickupIds.size() < batchSize) {
                     break;
                 }
             }

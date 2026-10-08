@@ -11,4 +11,7 @@ public interface PartnerRepository extends JpaRepository<Partner,UUID>, JpaSpeci
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT p FROM Partner p WHERE p.id = :id")
     Optional<Partner> findByIdForUpdate(@Param("id") UUID id);
+
+    @Query("SELECT p.userId FROM Partner p WHERE p.id = :partnerId")
+    Optional<UUID> findUserIdByPartnerId(@Param("partnerId") UUID partnerId);
 }

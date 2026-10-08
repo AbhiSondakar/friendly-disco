@@ -7,7 +7,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 @Entity
-@Table(name = "push_tokens")
+@Table(name = "push_tokens", uniqueConstraints = @UniqueConstraint(name = "uq_push_tokens_token", columnNames = "token"))
 @IdClass(PushToken.PushTokenId.class)
 public class PushToken {
 

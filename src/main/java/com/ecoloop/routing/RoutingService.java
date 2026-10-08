@@ -1,20 +1,35 @@
 package com.ecoloop.routing;
 
+import com.ecoloop.audit.AuditService;
+import com.ecoloop.common.security.ActorContext;
+import com.ecoloop.common.security.Role;
 import com.ecoloop.device.Device;
 import com.ecoloop.device.DeviceRepository;
+import com.ecoloop.identity.User;
+import com.ecoloop.identity.UserRepository;
+import com.ecoloop.notification.NotificationService;
 import com.ecoloop.partner.Partner;
 import com.ecoloop.partner.PartnerRepository;
+import com.ecoloop.pickup.PickupAcceptedEvent;
+import com.ecoloop.pickup.PickupCancelledEvent;
+import com.ecoloop.pickup.PickupCreatedEvent;
 import com.ecoloop.pickup.PickupRepository;
 import com.ecoloop.pickup.PickupRequest;
+import com.ecoloop.pickup.PickupService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.event.EventListener;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 public class RoutingService {
@@ -25,60 +40,90 @@ public class RoutingService {
     private final PartnerRepository partners;
     private final PickupRepository pickups;
     private final DeviceRepository devices;
-    private final com.ecoloop.pickup.PickupService pickupService;
+    private final PickupService pickupService;
+    private final ApplicationEventPublisher eventPublisher;
+    private final NotificationService notificationService;
+    private final AuditService auditService;
+    private final UserRepository users;
 
     public RoutingService(RoutingOfferRepository offers,
                           PartnerRepository partners,
                           PickupRepository pickups,
                           DeviceRepository devices,
-                          com.ecoloop.pickup.PickupService pickupService) {
+                          PickupService pickupService) {
+        this(offers, partners, pickups, devices, pickupService, null, null, null, null);
+    }
+
+    @Autowired
+    public RoutingService(RoutingOfferRepository offers,
+                          PartnerRepository partners,
+                          PickupRepository pickups,
+                          DeviceRepository devices,
+                          PickupService pickupService,
+                          ApplicationEventPublisher eventPublisher,
+                          NotificationService notificationService,
+                          AuditService auditService,
+                          UserRepository users) {
         this.offers = offers;
         this.partners = partners;
         this.pickups = pickups;
         this.devices = devices;
         this.pickupService = pickupService;
+        this.eventPublisher = eventPublisher;
+        this.notificationService = notificationService;
+        this.auditService = auditService;
+        this.users = users;
     }
 
+    public double score(boolean capabilityMatch, double ratingScore, double loadScore) {
+        return 0.50 * (capabilityMatch ? 1.0 : 0.0)
+            + 0.25 * ratingScore
+            + 0.25 * loadScore;
+    }
+
+    @Deprecated
     public double score(boolean capabilityMatch, double conditionFit, double distanceScore,
                         double ratingScore, double loadScore) {
-        return .30 * (capabilityMatch ? 1.0 : 0.0)
-            + .20 * conditionFit
-            + .20 * distanceScore
-            + .15 * ratingScore
-            + .15 * loadScore;
+        return score(capabilityMatch, ratingScore, loadScore);
+    }
+
+    public boolean matchesServiceArea(Partner partner, String pickupAddress) {
+        if (partner == null || partner.getServiceAreas() == null || partner.getServiceAreas().isBlank()) {
+            return true;
+        }
+        if (pickupAddress == null || pickupAddress.isBlank()) {
+            return true;
+        }
+        String normalizedAddress = pickupAddress.toLowerCase();
+        String[] areas = partner.getServiceAreas().split("[,;\n\r]+");
+        for (String area : areas) {
+            String trimmed = area.trim().toLowerCase();
+            if (!trimmed.isEmpty() && (trimmed.equals("*") || trimmed.equals("all") || normalizedAddress.contains(trimmed))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Transactional
     public RoutingOffer acceptOffer(UUID partnerUserId, UUID offerId) {
         Partner partner = requirePartner(partnerUserId);
-        if (!"approved".equalsIgnoreCase(partner.getStatus())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Partner is not approved");
-        }
+        RoutingOffer offer = offers.findById(offerId)
+            .orElseThrow(() -> new AccessDeniedException("Offer not found"));
 
-        RoutingOffer offer = offers.findByIdAndPartnerIdForUpdate(offerId, partner.getId())
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Offer not found"));
-
-        enforceOfferNotExpired(offer);
-
-        if (!"offered".equalsIgnoreCase(offer.getStatus())) {
-            throw new IllegalStateException("Offer is no longer available (current status: " + offer.getStatus() + ")");
-        }
-
-        offer.accept();
-        RoutingOffer saved = offers.save(offer);
-        pickupService.acceptByPartnerUser(partnerUserId, saved.getPickupId());
-        return saved;
+        pickupService.acceptOfferedPickup(new ActorContext(partnerUserId, Role.PARTNER), offer.getPickupId(), offerId);
+        return offers.findById(offerId).orElse(offer);
     }
 
-    @org.springframework.context.event.EventListener
+    @EventListener
     @Transactional
-    public void onPickupCancelled(com.ecoloop.pickup.PickupCancelledEvent event) {
+    public void onPickupCancelled(PickupCancelledEvent event) {
         cancelOffersForPickup(event.pickupId());
     }
 
-    @org.springframework.context.event.EventListener
+    @EventListener
     @Transactional
-    public void onPickupAccepted(com.ecoloop.pickup.PickupAcceptedEvent event) {
+    public void onPickupAccepted(PickupAcceptedEvent event) {
         for (RoutingOffer other : offers.findAllByPickupId(event.pickupId())) {
             if (!other.getPartnerId().equals(event.partnerId()) && "offered".equals(other.getStatus())) {
                 other.setStatus("superseded");
@@ -87,16 +132,28 @@ public class RoutingService {
         }
     }
 
-    @org.springframework.context.event.EventListener
+    @EventListener
     @Transactional
-    public void onPickupCreated(com.ecoloop.pickup.PickupCreatedEvent event) {
-        createTopNOffers(event.pickupId());
+    public void onPickupCreated(PickupCreatedEvent event) {
+        int dispatched = createTopNOffers(event.pickupId(), 1);
+        if (dispatched == 0) {
+            escalateToAdminQueue(event.pickupId(), "No eligible partners available for initial routing");
+        }
     }
 
-    public void createTopNOffers(UUID pickupId) {
+    public int createTopNOffers(UUID pickupId) {
+        return createTopNOffers(pickupId, 1);
+    }
+
+    @Transactional
+    public int createTopNOffers(UUID pickupId, int round) {
         Optional<PickupRequest> pickupOpt = pickups.findById(pickupId);
-        if (pickupOpt.isEmpty()) return;
+        if (pickupOpt.isEmpty()) return 0;
         PickupRequest pickup = pickupOpt.get();
+        if (!"pending".equalsIgnoreCase(pickup.getStatus())) {
+            log.info("Pickup {} status is {}, skipping offer generation", pickupId, pickup.getStatus());
+            return 0;
+        }
 
         String category = null;
         if (pickup.getDeviceId() != null) {
@@ -104,17 +161,38 @@ public class RoutingService {
         }
 
         List<Partner> approvedPartners = partners.findAllByStatus("approved");
-        List<ScoredPartner> candidates = new ArrayList<>();
+        if (approvedPartners.isEmpty()) {
+            log.info("No approved partners found for pickup {}", pickupId);
+            return 0;
+        }
+
+        // Exclude partners who previously had ANY offer (offered, accepted, rejected, expired, cancelled, superseded)
+        Set<UUID> previouslyOfferedPartnerIds = offers.findAllByPickupId(pickupId).stream()
+            .map(RoutingOffer::getPartnerId)
+            .collect(Collectors.toSet());
 
         Map<UUID, Long> activeJobsByPartner = new HashMap<>();
-        if (!approvedPartners.isEmpty()) {
-            List<UUID> partnerIds = approvedPartners.stream().map(Partner::getId).toList();
-            for (Object[] row : pickups.countActiveJobsByPartnerIds(partnerIds)) {
+        List<UUID> candidatePartnerIds = approvedPartners.stream()
+            .map(Partner::getId)
+            .filter(id -> !previouslyOfferedPartnerIds.contains(id))
+            .toList();
+
+        if (!candidatePartnerIds.isEmpty()) {
+            for (Object[] row : pickups.countActiveJobsByPartnerIds(candidatePartnerIds)) {
                 activeJobsByPartner.put((UUID) row[0], (Long) row[1]);
             }
         }
 
+        List<ScoredPartner> candidates = new ArrayList<>();
         for (Partner p : approvedPartners) {
+            if (previouslyOfferedPartnerIds.contains(p.getId())) {
+                continue; // Exclude prior offered / rejected / expired partners
+            }
+
+            if (!matchesServiceArea(p, pickup.getAddress())) {
+                continue; // Exclude partners outside service area
+            }
+
             long activeJobs = activeJobsByPartner.getOrDefault(p.getId(), 0L);
             if (activeJobs >= p.getCapacity()) {
                 continue; // Partner is at full capacity
@@ -124,7 +202,7 @@ public class RoutingService {
                 (category == null || p.getCapabilities().toLowerCase().contains(category.toLowerCase()));
             double loadScore = p.getCapacity() > 0 ? (1.0 - (double) activeJobs / p.getCapacity()) : 0.5;
             double ratingScore = p.getRating() != null ? Math.min(1.0, p.getRating().doubleValue() / 5.0) : 0.8;
-            double totalScore = score(capabilityMatch, 1.0, 1.0, ratingScore, loadScore);
+            double totalScore = score(capabilityMatch, ratingScore, loadScore);
 
             candidates.add(new ScoredPartner(p, totalScore));
         }
@@ -133,24 +211,113 @@ public class RoutingService {
         candidates.sort(Comparator.comparingDouble(ScoredPartner::score).reversed());
         List<ScoredPartner> topN = candidates.stream().limit(5).toList();
 
+        int createdCount = 0;
         for (ScoredPartner sp : topN) {
-            if (!offers.existsByPickupIdAndPartnerIdAndStatusIn(
-                    pickupId, sp.partner().getId(), List.of("offered", "accepted"))) {
-                RoutingOffer offer = new RoutingOffer(
-                    pickupId,
-                    sp.partner().getId(),
-                    Instant.now().plusSeconds(24 * 3600)
-                );
-                offer.setScore(sp.score());
-                offers.save(offer);
+            RoutingOffer offer = new RoutingOffer(
+                pickupId,
+                sp.partner().getId(),
+                Instant.now().plusSeconds(24 * 3600),
+                round
+            );
+            offer.setScore(sp.score());
+            offers.save(offer);
+            createdCount++;
+        }
+        log.info("Dispatched {} routing offers for pickup: {} (round {})", createdCount, pickupId, round);
+        return createdCount;
+    }
+
+    @EventListener
+    @Transactional
+    public void onAllOffersExpired(AllOffersExpiredEvent event) {
+        log.info("Handling AllOffersExpiredEvent for pickup: {}, round: {}", event.pickupId(), event.round());
+        Optional<PickupRequest> pickupOpt = pickups.findById(event.pickupId());
+        if (pickupOpt.isEmpty()) return;
+        PickupRequest pickup = pickupOpt.get();
+        if (!"pending".equalsIgnoreCase(pickup.getStatus())) {
+            log.info("Pickup {} status is {}, skipping re-routing on expired offers", event.pickupId(), pickup.getStatus());
+            return;
+        }
+
+        if (event.round() >= 3) {
+            log.warn("Pickup {} reached maximum routing rounds (3), escalating to admin queue", event.pickupId());
+            escalateToAdminQueue(event.pickupId(), "Maximum routing rounds (3) reached without partner acceptance");
+            return;
+        }
+
+        int nextRound = event.round() + 1;
+        int dispatched = createTopNOffers(event.pickupId(), nextRound);
+        if (dispatched == 0) {
+            log.warn("Pickup {} round {} produced no eligible offers, escalating to admin queue", event.pickupId(), nextRound);
+            escalateToAdminQueue(event.pickupId(), "No eligible partners available for routing round " + nextRound);
+        }
+    }
+
+    @Transactional
+    public void checkAndHandleExpiredOffers(UUID pickupId) {
+        Optional<PickupRequest> pickupOpt = pickups.findById(pickupId);
+        if (pickupOpt.isEmpty()) return;
+        PickupRequest pickup = pickupOpt.get();
+        if (!"pending".equalsIgnoreCase(pickup.getStatus())) {
+            return;
+        }
+
+        long activeOffers = offers.countActiveOffersByPickupId(pickupId, Instant.now());
+        if (activeOffers == 0) {
+            int maxRound = offers.findMaxRoundByPickupId(pickupId);
+            if (maxRound == 0) {
+                maxRound = 1;
+            }
+            if (eventPublisher != null) {
+                eventPublisher.publishEvent(new AllOffersExpiredEvent(pickupId, maxRound));
             }
         }
-        log.info("Dispatched {} routing offers for pickup: {}", topN.size(), pickupId);
+    }
+
+    @Transactional
+    public void escalateToAdminQueue(UUID pickupId, String reason) {
+        log.warn("Escalating pickup {} to admin queue: {}", pickupId, reason);
+        Optional<PickupRequest> pickupOpt = pickups.findById(pickupId);
+        if (pickupOpt.isEmpty()) return;
+        PickupRequest pickup = pickupOpt.get();
+
+        if (users != null && notificationService != null) {
+            List<User> admins = users.findAllByRole("ADMIN");
+            for (User admin : admins) {
+                notificationService.create(
+                    admin.getId(),
+                    "pickup_routing_escalated",
+                    "Pickup Routing Escalated",
+                    "Pickup " + pickupId + " escalated to admin queue: " + reason
+                );
+            }
+        }
+
+        if (notificationService != null && pickup.getUserId() != null) {
+            notificationService.create(
+                pickup.getUserId(),
+                "pickup_routing_delayed",
+                "Pickup Routing Update",
+                "We are searching for an available partner for your pickup request. Platform administrators have been notified."
+            );
+        }
+
+        if (auditService != null) {
+            auditService.record(
+                null,
+                "SYSTEM",
+                "pickup.routing_escalated",
+                "pickup_requests",
+                pickupId,
+                "ESCALATED",
+                Map.of("reason", reason)
+            );
+        }
     }
 
     public void cancelOffersForPickup(UUID pickupId) {
         for (RoutingOffer offer : offers.findAllByPickupId(pickupId)) {
-            if ("offered".equals(offer.getStatus()) || "pending".equals(offer.getStatus())) {
+            if ("offered".equals(offer.getStatus()) || "accepted".equals(offer.getStatus())) {
                 offer.setStatus("cancelled");
                 offers.save(offer);
             }
@@ -170,13 +337,20 @@ public class RoutingService {
 
         enforceOfferNotExpired(offer);
 
-        if (!Set.of("offered", "accepted", "in_progress").contains(offer.getStatus())) {
+        if (!Set.of("offered", "accepted").contains(offer.getStatus())) {
             throw new IllegalStateException("Offer is no longer available (current status: " + offer.getStatus() + ")");
         }
 
+        String previousStatus = offer.getStatus();
         offer.reject(reason);
+        RoutingOffer saved = offers.save(offer);
         log.info("Offer {} rejected by partner {}: reason={}", offerId, partner.getId(), reason);
-        return offers.save(offer);
+        
+        if ("accepted".equals(previousStatus)) {
+            pickupService.rejectAssignedPickup(new ActorContext(partnerUserId, Role.PARTNER), saved.getPickupId(), reason);
+        }
+        
+        return saved;
     }
 
     private Partner requirePartner(UUID partnerUserId) {
@@ -199,6 +373,7 @@ public class RoutingService {
                 offer.getId(), offer.getExpiresAt(), now);
             offer.setStatus("expired");
             offers.save(offer);
+            checkAndHandleExpiredOffers(offer.getPickupId());
         }
         if (offer.getExpiresAt().isBefore(now)) {
             log.warn("Expired offer accessed: offerId={} status={} expiresAt={}",

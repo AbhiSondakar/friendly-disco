@@ -27,10 +27,7 @@ public class AuditLoggingInterceptor implements HandlerInterceptor {
     private static final Logger log = LoggerFactory.getLogger("ecoloop.audit");
     private static final int MAX_DETAIL_FIELDS = 20;
     private static final int MAX_DETAIL_VALUE_LENGTH = 256;
-    private static final Set<String> SENSITIVE_FIELD_NAMES = Set.of(
-        "password", "token", "secret", "authorization", "cookie", "email", "phone",
-        "address", "license", "evidence", "image", "file"
-    );
+    private static final Set<String> SENSITIVE_FIELD_NAMES = AuditRedactionKeys.SENSITIVE_FIELD_NAMES;
 
     private final AuditService auditService;
     private final ObjectMapper objectMapper;
