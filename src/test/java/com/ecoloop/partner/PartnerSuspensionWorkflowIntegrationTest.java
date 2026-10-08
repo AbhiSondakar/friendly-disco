@@ -30,6 +30,18 @@ class PartnerSuspensionWorkflowIntegrationTest {
     @Autowired NotificationRepository notifications;
 
     @Test
+    void approvalPromotesPendingPartnerUserToPartnerRole() {
+        User applicant = users.save(new User(email("applicant"), "hash", "Applicant", "HOUSEHOLD"));
+        Partner pendingPartner = partners.save(new Partner(
+            applicant.getId(), "Pending Org", "Recycler", "LIC-" + UUID.randomUUID()));
+
+        Partner approvedPartner = lifecycle.approve(pendingPartner.getId());
+
+        assertEquals("approved", approvedPartner.getStatus());
+        assertEquals("PARTNER", users.findById(applicant.getId()).orElseThrow().getRole());
+    }
+
+    @Test
     void suspensionCancelsActiveJobsAndEveryRelatedOfferBeforeNotifyingParties() {
         User household = users.save(new User(email("household"), "hash", "Household", "HOUSEHOLD"));
         User suspendedPartnerUser = users.save(new User(email("suspended"), "hash", "Partner", "PARTNER"));
