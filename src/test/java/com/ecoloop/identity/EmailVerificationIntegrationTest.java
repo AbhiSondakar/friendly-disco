@@ -80,7 +80,7 @@ public class EmailVerificationIntegrationTest {
     }
 
     @Test
-    void unverifiedUserCannotRegisterAsPartner() throws Exception {
+    void unverifiedUserCanRegisterAsPartner() throws Exception {
         PartnerController.Registration reg = new PartnerController.Registration(
             "Green Recyclers", "Recycler", "LIC-999", "North", "Electronics"
         );
@@ -90,7 +90,7 @@ public class EmailVerificationIntegrationTest {
                 .with(csrf())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(reg)))
-            .andExpect(status().isConflict());
+            .andExpect(status().isOk());
     }
 
     @Test

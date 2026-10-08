@@ -135,6 +135,22 @@ public class RoutingService {
     @EventListener
     @Transactional
     public void onPickupCreated(PickupCreatedEvent event) {
+        Optional<PickupRequest> pickupOpt = pickups.findById(event.pickupId());
+        if (pickupOpt.isPresent()) {
+            PickupRequest pickup = pickupOpt.get();
+            if (pickup.getDeviceId() != null) {
+                Optional<com.ecoloop.device.Device> dev = devices.findById(pickup.getDeviceId());
+                if (dev.isPresent()) {
+                    String cat = dev.get().getCategory();
+                    String aiCat = dev.get().getAiCategory();
+                    if ("other".equalsIgnoreCase(cat) || "other".equalsIgnoreCase(aiCat)) {
+                        escalateToAdminQueue(event.pickupId(), "Category 'other' requires manual approval");
+                        return;
+                    }
+                }
+            }
+        }
+
         int dispatched = createTopNOffers(event.pickupId(), 1);
         if (dispatched == 0) {
             escalateToAdminQueue(event.pickupId(), "No eligible partners available for initial routing");
