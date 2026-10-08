@@ -74,9 +74,6 @@ public class PartnerController {
         var sessionUser = SessionUser.require(request);
         User user = users.findById(sessionUser.id())
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found"));
-        if (!user.isEmailVerified()) {
-            throw new IllegalStateException("Email must be verified before registering as a partner");
-        }
         if (partners.findByUserId(sessionUser.id()).isPresent()) {
             throw new IllegalStateException("Partner profile already exists");
         }
