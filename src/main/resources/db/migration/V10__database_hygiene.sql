@@ -60,6 +60,7 @@ BEGIN
     SELECT count(*) INTO phone_duplicate_count
     FROM (
         SELECT phone
+        FROM users
         WHERE phone IS NOT NULL AND trim(phone) <> ''
         GROUP BY phone
         HAVING count(*) > 1
