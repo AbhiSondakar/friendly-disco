@@ -56,20 +56,36 @@ BEGIN
         RAISE WARNING 'Flyway V10 Precondition: No duplicate push_tokens found';
     END IF;
 
-    -- Fail fast if duplicate non-null phone numbers exist in users
+    -- Resolve duplicate non-null phone numbers in users
+    -- Resolution policy: newest created_at wins. Older duplicates get phone set to NULL.
     SELECT count(*) INTO phone_duplicate_count
-    FROM (
-        SELECT phone
-        FROM users
-        WHERE phone IS NOT NULL AND trim(phone) <> ''
-        GROUP BY phone
-        HAVING count(*) > 1
-    ) sub;
+    FROM users u1
+    WHERE u1.phone IS NOT NULL AND trim(u1.phone) <> ''
+      AND EXISTS (
+        SELECT 1 FROM users u2
+        WHERE u1.phone = u2.phone
+          AND u1.id <> u2.id
+          AND (u1.created_at < u2.created_at OR (u1.created_at = u2.created_at AND u1.id < u2.id))
+      );
+
+    IF phone_duplicate_count > abort_threshold THEN
+        RAISE EXCEPTION 'Flyway V10 Precondition Aborted: % duplicate phone rows exceed threshold of %',
+            phone_duplicate_count, abort_threshold;
+    END IF;
 
     IF phone_duplicate_count > 0 THEN
-        RAISE EXCEPTION 'Flyway V10 Precondition Failed: Duplicate phone numbers exist in users table (% duplicate groups). Resolve manually before migrating.', phone_duplicate_count;
+        UPDATE users u1
+        SET phone = NULL
+        WHERE u1.phone IS NOT NULL AND trim(u1.phone) <> ''
+          AND EXISTS (
+            SELECT 1 FROM users u2
+            WHERE u1.phone = u2.phone
+              AND u1.id <> u2.id
+              AND (u1.created_at < u2.created_at OR (u1.created_at = u2.created_at AND u1.id < u2.id))
+          );
+        RAISE WARNING 'Flyway V10 Precondition: Nullified phone on % older duplicate user rows (newest created_at retained)', phone_duplicate_count;
     ELSE
-        RAISE WARNING 'Flyway V10 Precondition: Phone uniqueness verified successfully';
+        RAISE WARNING 'Flyway V10 Precondition: No duplicate phone numbers found';
     END IF;
 END $$;
 
