@@ -65,3 +65,4 @@ New device photos, partner licenses, and pickup evidence are stored in PostgreSQ
 Existing uploads created before this change still use their recorded filesystem path when their file is present. A database migration cannot restore file bytes that were already lost when an ephemeral host restarted or redeployed; those historical image links will continue to return not found.
 
 Database-backed files make PostgreSQL larger and increase backup and restore time. Include the database in regular backups and monitor its storage as uploads grow. Each upload remains limited to 5 MB.
+"# friendly-disco" 
