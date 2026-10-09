@@ -26,8 +26,8 @@ class PickupServiceIT {
 
     @Test
     void claimPickup_Success() {
-        User u = users.save(new User("h1@example.com", "hash", "H"));
-        User pU = users.save(new User("p1@example.com", "hash", "P"));
+        User u = users.save(new User("h1@example.com", "hash", "H", "HOUSEHOLD"));
+        User pU = users.save(new User("p1@example.com", "hash", "P", "PARTNER"));
         Partner p = partners.save(new Partner(pU.getId(), "Org", "type", "lic"));
         p.setStatus("approved");
         partners.save(p);
@@ -43,8 +43,8 @@ class PickupServiceIT {
 
     @Test
     void startTransit_Success() {
-        User u = users.save(new User("h2@example.com", "hash", "H"));
-        User pU = users.save(new User("p2@example.com", "hash", "P"));
+        User u = users.save(new User("h2@example.com", "hash", "H", "HOUSEHOLD"));
+        User pU = users.save(new User("p2@example.com", "hash", "P", "PARTNER"));
         Partner p = partners.save(new Partner(pU.getId(), "Org", "type", "lic"));
         p.setStatus("approved");
         partners.save(p);
@@ -59,8 +59,8 @@ class PickupServiceIT {
 
     @Test
     void markCollected_Success() {
-        User u = users.save(new User("h3@example.com", "hash", "H"));
-        User pU = users.save(new User("p3@example.com", "hash", "P"));
+        User u = users.save(new User("h3@example.com", "hash", "H", "HOUSEHOLD"));
+        User pU = users.save(new User("p3@example.com", "hash", "P", "PARTNER"));
         Partner p = partners.save(new Partner(pU.getId(), "Org", "type", "lic"));
         p.setStatus("approved");
         partners.save(p);
@@ -76,8 +76,8 @@ class PickupServiceIT {
 
     @Test
     void deliverPickup_Success() {
-        User u = users.save(new User("h4@example.com", "hash", "H"));
-        User pU = users.save(new User("p4@example.com", "hash", "P"));
+        User u = users.save(new User("h4@example.com", "hash", "H", "HOUSEHOLD"));
+        User pU = users.save(new User("p4@example.com", "hash", "P", "PARTNER"));
         Partner p = partners.save(new Partner(pU.getId(), "Org", "type", "lic"));
         p.setStatus("approved");
         p.setWarehouseId("WH-1");
@@ -95,8 +95,8 @@ class PickupServiceIT {
 
     @Test
     void claimPickup_CapacityExceeded() {
-        User u = users.save(new User("h5@example.com", "hash", "H"));
-        User pU = users.save(new User("p5@example.com", "hash", "P"));
+        User u = users.save(new User("h5@example.com", "hash", "H", "HOUSEHOLD"));
+        User pU = users.save(new User("p5@example.com", "hash", "P", "PARTNER"));
         Partner p = partners.save(new Partner(pU.getId(), "Org", "type", "lic"));
         p.setStatus("approved");
         p.setCapacity(0); // Exceed capacity immediately
@@ -110,8 +110,8 @@ class PickupServiceIT {
 
     @Test
     void deliverPickup_WrongWarehouseId() {
-        User u = users.save(new User("h6@example.com", "hash", "H"));
-        User pU = users.save(new User("p6@example.com", "hash", "P"));
+        User u = users.save(new User("h6@example.com", "hash", "H", "HOUSEHOLD"));
+        User pU = users.save(new User("p6@example.com", "hash", "P", "PARTNER"));
         Partner p = partners.save(new Partner(pU.getId(), "Org", "type", "lic"));
         p.setStatus("approved");
         p.setWarehouseId("WH-1");

@@ -38,8 +38,8 @@ class PartnerDeliveryFlowIT {
     @Test
     void fullDeliveryFlow_statusProgressionAndRewardAwarded() {
         // 1. Setup: household user + pickup
-        User household = users.save(new User("flow-household@example.com", "hash", "H"));
-        User partnerUser = users.save(new User("flow-partner@example.com", "hash", "P"));
+        User household = users.save(new User("flow-household@example.com", "hash", "H", "HOUSEHOLD"));
+        User partnerUser = users.save(new User("flow-partner@example.com", "hash", "P", "PARTNER"));
 
         Partner partner = new Partner(partnerUser.getId(), "FlowOrg", "type", "lic");
         partner.setStatus("approved");
@@ -104,8 +104,8 @@ class PartnerDeliveryFlowIT {
     void deliveredJobDoesNotDoubleRewardOnComplete() {
         // Ensure that calling completeJob on an already-delivered pickup does not
         // create a second reward ledger entry (BOQ-3 double-reward guard).
-        User household = users.save(new User("no-double@example.com", "hash", "H"));
-        User partnerUser = users.save(new User("no-double-p@example.com", "hash", "P"));
+        User household = users.save(new User("no-double@example.com", "hash", "H", "HOUSEHOLD"));
+        User partnerUser = users.save(new User("no-double-p@example.com", "hash", "P", "PARTNER"));
 
         Partner partner = new Partner(partnerUser.getId(), "NoDblOrg", "type", "lic");
         partner.setStatus("approved");
