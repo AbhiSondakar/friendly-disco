@@ -189,7 +189,7 @@ public class PickupRequest extends AbstractAggregateRoot<PickupRequest> {
             request != null ? request.condition() : null,
             request != null ? request.notes() : null,
             request != null ? request.evidenceUrl() : null,
-            actor.partnerId()
+            actor.userId()
         );
         registerEvent(new PickupVerifiedEvent(this.id, this.partnerId));
         return this;
