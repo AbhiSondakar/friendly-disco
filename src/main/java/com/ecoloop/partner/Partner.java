@@ -51,6 +51,9 @@ public class Partner {
     @Column(name = "license_upload_id")
     private UUID licenseUploadId;
 
+    @Column(name = "warehouse_id", length = 100)
+    private String warehouseId;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 
@@ -80,6 +83,8 @@ public class Partner {
     public void setLicenseNo(String licenseNo) { this.licenseNo = licenseNo; }
     public UUID getLicenseUploadId() { return licenseUploadId; }
     public void setLicenseUploadId(UUID licenseUploadId) { this.licenseUploadId = licenseUploadId; }
+    public String getWarehouseId() { return warehouseId; }
+    public void setWarehouseId(String warehouseId) { this.warehouseId = warehouseId; }
     public String getServiceAreas() { return serviceAreas; }
     public void setServiceAreas(String serviceAreas) { this.serviceAreas = serviceAreas; }
     public String getFacilityAddress() { return facilityAddress; }

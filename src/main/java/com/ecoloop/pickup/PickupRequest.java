@@ -40,6 +40,18 @@ public class PickupRequest extends AbstractAggregateRoot<PickupRequest> {
     @Column(name = "scheduled_at")
     private Instant scheduledAt;
 
+    @Column(name = "assigned_at")
+    private Instant assignedAt;
+
+    @Column(name = "in_transit_at")
+    private Instant inTransitAt;
+
+    @Column(name = "collected_at")
+    private Instant collectedAt;
+
+    @Column(name = "delivered_at")
+    private Instant deliveredAt;
+
     @Column(name = "completed_at")
     private Instant completedAt;
 
@@ -93,6 +105,14 @@ public class PickupRequest extends AbstractAggregateRoot<PickupRequest> {
     public void setPickupLon(Double pickupLon) { this.pickupLon = pickupLon; }
     public Instant getScheduledAt() { return scheduledAt; }
     public void setScheduledAt(Instant scheduledAt) { this.scheduledAt = scheduledAt; }
+    public Instant getAssignedAt() { return assignedAt; }
+    public void setAssignedAt(Instant assignedAt) { this.assignedAt = assignedAt; }
+    public Instant getInTransitAt() { return inTransitAt; }
+    public void setInTransitAt(Instant inTransitAt) { this.inTransitAt = inTransitAt; }
+    public Instant getCollectedAt() { return collectedAt; }
+    public void setCollectedAt(Instant collectedAt) { this.collectedAt = collectedAt; }
+    public Instant getDeliveredAt() { return deliveredAt; }
+    public void setDeliveredAt(Instant deliveredAt) { this.deliveredAt = deliveredAt; }
     public Instant getCompletedAt() { return completedAt; }
     public void setCompletedAt(Instant completedAt) { this.completedAt = completedAt; }
     public String getVerifiedCategory() { return verifiedCategory; }
@@ -128,13 +148,63 @@ public class PickupRequest extends AbstractAggregateRoot<PickupRequest> {
         if (!actor.isAdmin() && !actor.userId().equals(this.userId)) {
             throw new AccessDeniedException("Pickup does not belong to this user");
         }
-        if (!Set.of("pending", "accepted").contains(this.status)) {
+        if (!Set.of("pending", "accepted", "assigned").contains(this.status)) {
             throw new IllegalStateException("Invalid pickup state transition");
         }
 
         this.status = "cancelled";
         this.updatedAt = Instant.now();
         registerEvent(new PickupCancelledEvent(this.id));
+        return this;
+    }
+
+    private void requireAssignedPartner(ActorContext actor) {
+        if (actor == null || !actor.isPartner()) throw new AccessDeniedException("Only assigned partner can perform this action");
+        if (actor.partnerId() == null || !actor.partnerId().equals(this.partnerId))
+            throw new AccessDeniedException("Pickup is not assigned to this partner");
+    }
+
+    public PickupRequest assignTo(ActorContext actor, UUID partnerId) {
+        if (actor == null || !actor.isPartner()) throw new AccessDeniedException("Only partners can claim jobs");
+        if (!"pending".equals(this.status) || this.partnerId != null)
+            throw new IllegalStateException("Pickup is not available for claiming");
+        this.partnerId = partnerId;
+        this.status = "assigned";
+        this.assignedAt = Instant.now();
+        this.updatedAt = Instant.now();
+        return this;
+    }
+
+    public PickupRequest startTransitBy(ActorContext actor) {
+        requireAssignedPartner(actor);
+        if (!"assigned".equals(this.status))
+            throw new IllegalStateException("Pickup must be assigned before starting transit");
+        this.status = "in_transit";
+        this.inTransitAt = Instant.now();
+        this.updatedAt = Instant.now();
+        return this;
+    }
+
+    public PickupRequest markCollectedBy(ActorContext actor) {
+        requireAssignedPartner(actor);
+        if (!"in_transit".equals(this.status))
+            throw new IllegalStateException("Pickup must be in transit before marking collected");
+        this.status = "collected";
+        this.collectedAt = Instant.now();
+        this.updatedAt = Instant.now();
+        return this;
+    }
+
+    public PickupRequest deliverBy(ActorContext actor, String warehouseId, String expectedWarehouseId) {
+        requireAssignedPartner(actor);
+        if (!"collected".equals(this.status))
+            throw new IllegalStateException("Pickup must be collected before delivery");
+        if (expectedWarehouseId != null && !expectedWarehouseId.equals(warehouseId))
+            throw new IllegalStateException("Warehouse ID does not match partner's registered warehouse");
+        this.status = "delivered";
+        this.deliveredAt = Instant.now();
+        this.completedAt = Instant.now();
+        this.updatedAt = Instant.now();
         return this;
     }
 
@@ -170,7 +240,7 @@ public class PickupRequest extends AbstractAggregateRoot<PickupRequest> {
         if ("completed".equals(this.status)) {
             return this;
         }
-        if (!Set.of("accepted", "verified").contains(this.status)) {
+        if (!Set.of("accepted", "verified", "delivered").contains(this.status)) {
             throw new IllegalStateException("Pickup cannot be completed from status: " + this.status);
         }
 
@@ -208,7 +278,7 @@ public class PickupRequest extends AbstractAggregateRoot<PickupRequest> {
         if (!suspendedPartnerId.equals(this.partnerId)) {
             throw new IllegalArgumentException("Pickup is not assigned to the suspended partner");
         }
-        if (!Set.of("accepted", "verified").contains(this.status)) {
+        if (!Set.of("accepted", "assigned", "in_transit", "collected", "verified").contains(this.status)) {
             return false;
         }
 

@@ -27,7 +27,7 @@ public class NotificationListener {
     private static final Logger log = LoggerFactory.getLogger(NotificationListener.class);
 
     private final NotificationService notifications;
-        private final PickupRepository pickups;
+    private final PickupRepository pickups;
     private final PartnerRepository partners;
     private final NotificationPreferenceRepository preferences;
     private final NotificationDeliveryHandler deliveryHandler;
@@ -43,8 +43,6 @@ public class NotificationListener {
         this.preferences = preferences;
         this.deliveryHandler = deliveryHandler;
     }
-
-
 
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
@@ -76,7 +74,6 @@ public class NotificationListener {
     public void onPickupCancelled(PickupCancelledEvent event) {
         UUID pickupId = event.pickupId();
         pickups.findById(pickupId).ifPresent(pickup -> {
-            // Assigned partner (accepted jobs)
             Set<UUID> recipients = new LinkedHashSet<>();
             UUID partnerId = pickup.getPartnerId();
             if (partnerId != null) {
@@ -88,7 +85,6 @@ public class NotificationListener {
             }
             for (UUID partnerUserId : recipients) {
                 Notification n = notifications.create(partnerUserId, NotificationType.PICKUP_CANCELLED, pickupId, Map.of("pickupId", pickupId));
-                // Always delivered — bypass preference gate per spec.
                 deliveryHandler.offerAlways(partnerUserId, NotificationType.PICKUP_CANCELLED, n);
             }
             log.debug("PickupCancelled event fan-out: pickupId={} partners={}", pickupId, recipients.size());
@@ -146,6 +142,18 @@ public class NotificationListener {
 
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void onPickupDelivered(PickupDeliveredEvent event) {
+        UUID pickupId = event.pickupId();
+        pickups.findById(pickupId).ifPresent(pickup -> {
+            Notification n = notifications.create(pickup.getUserId(), NotificationType.PICKUP_DELIVERED, pickupId,
+                Map.of("pickupId", pickupId, "partnerId", event.partnerId()));
+            deliveryHandler.offerIfEnabled(pickup.getUserId(), NotificationType.PICKUP_DELIVERED, n, gate(NotificationType.PICKUP_DELIVERED));
+            log.debug("PickupDelivered event fan-out: pickupId={} household={}", pickupId, pickup.getUserId());
+        });
+    }
+
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onPartnerApproved(PartnerApprovedEvent event) {
         UUID userId = event.userId();
         Notification n = notifications.create(userId, NotificationType.PARTNER_APPROVED, event.partnerId(),
@@ -182,6 +190,7 @@ public class NotificationListener {
         mapping.put(NotificationType.PICKUP_REOFFERED, NotificationPreference::getPickupUpdates);
         mapping.put(NotificationType.PICKUP_VERIFIED, NotificationPreference::getPickupUpdates);
         mapping.put(NotificationType.PICKUP_COMPLETED, NotificationPreference::getPickupUpdates);
+        mapping.put(NotificationType.PICKUP_DELIVERED, NotificationPreference::getPickupUpdates);
         mapping.put(NotificationType.PICKUP_REASSIGNED, NotificationPreference::getPickupUpdates);
         mapping.put(NotificationType.PARTNER_CHANGED, NotificationPreference::getPickupUpdates);
         java.util.function.Function<NotificationPreference, Boolean> accessor = mapping.get(type);
@@ -196,4 +205,3 @@ public class NotificationListener {
         boolean isDeliveryEnabledFor(NotificationPreference pref);
     }
 }
-

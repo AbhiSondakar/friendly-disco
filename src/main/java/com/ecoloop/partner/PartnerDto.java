@@ -20,7 +20,8 @@ public record PartnerDto(
     Instant updatedAt,
     String facilityAddress,
     Double facilityLat,
-    Double facilityLon) {
+    Double facilityLon,
+    String warehouseId) {
 
     public static PartnerDto from(Partner p, boolean includeSensitive) {
         return new PartnerDto(
@@ -39,7 +40,8 @@ public record PartnerDto(
             p.getUpdatedAt(),
             p.getFacilityAddress(),
             p.getFacilityLat(),
-            p.getFacilityLon()
+            p.getFacilityLon(),
+            p.getWarehouseId()
         );
     }
 }

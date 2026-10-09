@@ -206,7 +206,7 @@ public class PickupService {
         PickupRequest pickup = pickups.findByIdForUpdate(pickupId)
             .orElseThrow(() -> new NoSuchElementException("Pickup not found"));
 
-        boolean alreadyCompleted = "completed".equals(pickup.getStatus());
+        boolean alreadyCompleted = "completed".equals(pickup.getStatus()) || "delivered".equals(pickup.getStatus());
         pickup.completeBy(actor.withPartnerId(partner.getId()));
         PickupRequest saved = pickups.save(pickup);
 
@@ -270,6 +270,66 @@ public class PickupService {
         return saved;
     }
 
+    @Transactional
+    public PickupRequest claimPickup(ActorContext actor, UUID pickupId) {
+        if (actor == null || !actor.isPartner()) throw new AccessDeniedException("Only partners can claim pickups");
+        Partner partner = requirePartner(actor.userId());
+
+        long activeJobs = pickups.countActiveJobsByPartnerId(partner.getId());
+        if (activeJobs >= partner.getCapacity())
+            throw new IllegalStateException("You have reached your maximum active capacity");
+
+        PickupRequest pickup = pickups.findByIdForUpdate(pickupId)
+            .orElseThrow(() -> new NoSuchElementException("Pickup not found"));
+        pickup.assignTo(actor.withPartnerId(partner.getId()), partner.getId());
+        return pickups.save(pickup);
+    }
+
+    @Transactional
+    public PickupRequest startTransit(ActorContext actor, UUID pickupId) {
+        if (actor == null || !actor.isPartner()) throw new AccessDeniedException("Only partners can start transit");
+        Partner partner = requirePartner(actor.userId());
+        PickupRequest pickup = pickups.findByIdForUpdate(pickupId)
+            .orElseThrow(() -> new NoSuchElementException("Pickup not found"));
+        pickup.startTransitBy(actor.withPartnerId(partner.getId()));
+        return pickups.save(pickup);
+    }
+
+    @Transactional
+    public PickupRequest markCollected(ActorContext actor, UUID pickupId) {
+        if (actor == null || !actor.isPartner()) throw new AccessDeniedException("Only partners can mark collected");
+        Partner partner = requirePartner(actor.userId());
+        PickupRequest pickup = pickups.findByIdForUpdate(pickupId)
+            .orElseThrow(() -> new NoSuchElementException("Pickup not found"));
+        pickup.markCollectedBy(actor.withPartnerId(partner.getId()));
+        return pickups.save(pickup);
+    }
+
+    @Transactional
+    public PickupRequest deliverPickup(ActorContext actor, UUID pickupId, String warehouseId) {
+        if (actor == null || !actor.isPartner()) throw new AccessDeniedException("Only partners can deliver pickups");
+        Partner partner = requirePartner(actor.userId());
+        PickupRequest pickup = pickups.findByIdForUpdate(pickupId)
+            .orElseThrow(() -> new NoSuchElementException("Pickup not found"));
+        pickup.deliverBy(actor.withPartnerId(partner.getId()), warehouseId, partner.getWarehouseId());
+
+        UUID householdId = pickup.getUserId();
+        try {
+            if (ledger.findByUserIdAndReferenceId(householdId, pickup.getId()).isEmpty()) {
+                ledger.save(new RewardLedger(householdId, 25, "earn",
+                    "Pickup delivered to warehouse", pickup.getId()));
+            }
+        } catch (DataIntegrityViolationException ex) {
+            log.info("Reward already awarded for pickup: {}", pickup.getId());
+        }
+        
+        events.publishEvent(new PickupDeliveredEvent(pickup.getId(), partner.getId()));
+        
+        audit.record(householdId, "partner", "pickup.delivered",
+            "pickup", pickup.getId(), "success");
+        return pickups.save(pickup);
+    }
+
     private Partner requirePartner(UUID partnerUserId) {
         Partner partner = partners.findByUserId(partnerUserId)
             .orElseThrow(() -> new AccessDeniedException("Partner profile not found"));
@@ -295,4 +355,5 @@ public class PickupService {
         return pickupList.stream().map(this::enrich).toList();
     }
 }
+
 

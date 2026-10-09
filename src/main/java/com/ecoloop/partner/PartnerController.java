@@ -6,6 +6,8 @@ import com.ecoloop.common.upload.FileStorageService;
 import com.ecoloop.identity.IdentityService;
 import com.ecoloop.identity.User;
 import com.ecoloop.identity.UserRepository;
+import com.ecoloop.common.security.Role;
+import com.ecoloop.pickup.OfferDto;
 import com.ecoloop.pickup.PickupRepository;
 import com.ecoloop.pickup.PickupRequest;
 import com.ecoloop.pickup.PickupService;
@@ -115,7 +117,8 @@ public class PartnerController {
         Integer capacity,
         String facilityAddress,
         Double facilityLat,
-        Double facilityLon) {}
+        Double facilityLon,
+        String warehouseId) {}
 
     @PatchMapping("/me")
     @PreAuthorize("hasRole('PARTNER')")
@@ -128,11 +131,61 @@ public class PartnerController {
         if (body.facilityAddress() != null) partner.setFacilityAddress(body.facilityAddress());
         if (body.facilityLat() != null) partner.setFacilityLat(body.facilityLat());
         if (body.facilityLon() != null) partner.setFacilityLon(body.facilityLon());
+        if (body.warehouseId() != null) partner.setWarehouseId(body.warehouseId());
         partner.setUpdatedAt(Instant.now());
         return PartnerDto.from(partners.save(partner), true);
     }
 
-    @GetMapping("/{id}")
+    @GetMapping("/offers")
+    @PreAuthorize("hasRole('PARTNER')")
+    public List<OfferDto> getOffers(HttpServletRequest request) {
+        currentPartner(request);
+        return pickups.findUnassigned().stream()
+                .map(OfferDto::from)
+                .toList();
+    }
+
+    @PostMapping("/offers/{id}/accept")
+    @PreAuthorize("hasRole('PARTNER')")
+    public OfferDto acceptOffer(@PathVariable UUID id, HttpServletRequest request) {
+        Partner partner = currentPartner(request);
+        try {
+            PickupRequest updated = pickupService.claimPickup(
+                new ActorContext(partner.getUserId(), Role.PARTNER, partner.getId()), id);
+            return new OfferDto(
+                updated.getId() != null ? updated.getId().toString() : null,
+                updated.getId() != null ? updated.getId().toString() : null,
+                updated.getPartnerId() != null ? updated.getPartnerId().toString() : null,
+                "accepted",
+                null,
+                0,
+                null,
+                updated.getCreatedAt() != null ? updated.getCreatedAt().toString() : null,
+                updated.getAddress()
+            );
+        } catch (IllegalStateException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+        }
+    }
+
+    public record RejectRequest(String reason) {}
+
+    @PostMapping("/offers/{id}/reject")
+    @PreAuthorize("hasRole('PARTNER')")
+    public OfferDto rejectOffer(@PathVariable UUID id, @RequestBody RejectRequest body, HttpServletRequest request) {
+        Partner partner = currentPartner(request);
+        PickupRequest pickup = pickups.findById(id)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Offer not found"));
+        
+        if (!"pending".equals(pickup.getStatus()) || pickup.getPartnerId() != null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Offer already accepted by someone else");
+        }
+        
+        log.info("Partner {} rejected offer {}. Reason: {}", partner.getId(), id, body.reason());
+        return OfferDto.from(pickup);
+    }
+
+    @GetMapping("/{id:[0-9a-fA-F\\-]{36}}")
     public Object get(@PathVariable UUID id, HttpServletRequest request) {
         SessionUser user = SessionUser.require(request);
         Partner partner = partners.findById(id)
@@ -154,7 +207,7 @@ public class PartnerController {
 
         long activeJobs = pickups.countActiveJobsByPartnerId(partnerId);
         long monthlyCompletions = pickups.findAllByPartnerId(partnerId).stream()
-            .filter(p -> "completed".equals(p.getStatus()))
+            .filter(p -> ("completed".equals(p.getStatus()) || "delivered".equals(p.getStatus())))
             .filter(p -> p.getCompletedAt() != null && p.getCompletedAt().isAfter(monthStart))
             .filter(p -> users.findById(p.getUserId()).map(u -> !u.isDeleted()).orElse(false))
             .count();
@@ -166,6 +219,11 @@ public class PartnerController {
         result.put("pointsBalance", pointsBalance);
         result.put("capacityUsed", activeJobs);
         result.put("capacityTotal", partner.getCapacity());
+        long offersToday = pickups.findUnassigned().stream()
+            .filter(p -> p.getCreatedAt() != null && p.getCreatedAt().isAfter(today))
+            .count();
+        result.put("offersToday", offersToday);
+        result.put("nextOfferAt", null);
         return result;
     }
 
@@ -206,6 +264,45 @@ public class PartnerController {
         return pickupService.enrich(pickupService.completeAssignedPickup(actor, id));
     }
 
+        @GetMapping("/available-jobs")
+    @PreAuthorize("hasRole('PARTNER')")
+    public List<com.ecoloop.pickup.PickupWithDevice> availableJobs(
+            @RequestParam(required = false) Double lat,
+            @RequestParam(required = false) Double lon,
+            HttpServletRequest request) {
+        currentPartner(request);  
+        return pickupService.enrich(pickups.findUnassigned());
+    }
+
+    @PostMapping("/jobs/{id}/assign")
+    @PreAuthorize("hasRole('PARTNER')")
+    public com.ecoloop.pickup.PickupWithDevice assignJob(@PathVariable UUID id, ActorContext actor) {
+        return pickupService.enrich(pickupService.claimPickup(actor, id));
+    }
+
+    @PostMapping("/jobs/{id}/start-transit")
+    @PreAuthorize("hasRole('PARTNER')")
+    public com.ecoloop.pickup.PickupWithDevice startTransit(@PathVariable UUID id, ActorContext actor) {
+        return pickupService.enrich(pickupService.startTransit(actor, id));
+    }
+
+    @PostMapping("/jobs/{id}/collected")
+    @PreAuthorize("hasRole('PARTNER')")
+    public com.ecoloop.pickup.PickupWithDevice markCollected(@PathVariable UUID id, ActorContext actor) {
+        return pickupService.enrich(pickupService.markCollected(actor, id));
+    }
+
+    public record DeliverRequest(String warehouseId) {}
+
+    @PostMapping("/jobs/{id}/deliver")
+    @PreAuthorize("hasRole('PARTNER')")
+    public com.ecoloop.pickup.PickupWithDevice deliver(
+            @PathVariable UUID id,
+            @RequestBody DeliverRequest body,
+            ActorContext actor) {
+        return pickupService.enrich(pickupService.deliverPickup(actor, id, body.warehouseId()));
+    }
+
     private Partner currentPartner(HttpServletRequest request) {
         var sessionUser = SessionUser.require(request);
         User user = users.findById(sessionUser.id())
@@ -221,4 +318,5 @@ public class PartnerController {
         return partner;
     }
 }
+
 

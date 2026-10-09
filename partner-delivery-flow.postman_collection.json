@@ -1,0 +1,83 @@
+{
+  "info": {
+    "name": "Partner Delivery Flow",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Available Jobs",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/api/partners/available-jobs",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "partners", "available-jobs"]
+        }
+      }
+    },
+    {
+      "name": "Assign Job",
+      "request": {
+        "method": "POST",
+        "url": {
+          "raw": "{{baseUrl}}/api/partners/jobs/{{jobId}}/assign",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "partners", "jobs", "{{jobId}}", "assign"]
+        }
+      }
+    },
+    {
+      "name": "Start Transit",
+      "request": {
+        "method": "POST",
+        "url": {
+          "raw": "{{baseUrl}}/api/partners/jobs/{{jobId}}/start-transit",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "partners", "jobs", "{{jobId}}", "start-transit"]
+        }
+      }
+    },
+    {
+      "name": "Collected",
+      "request": {
+        "method": "POST",
+        "url": {
+          "raw": "{{baseUrl}}/api/partners/jobs/{{jobId}}/collected",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "partners", "jobs", "{{jobId}}", "collected"]
+        }
+      }
+    },
+    {
+      "name": "Deliver",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"warehouseId\": \"WH-TEST-001\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/partners/jobs/{{jobId}}/deliver",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "partners", "jobs", "{{jobId}}", "deliver"]
+        }
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "jobId",
+      "value": ""
+    }
+  ]
+}

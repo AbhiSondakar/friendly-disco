@@ -11,7 +11,7 @@ public final class NotificationTemplates {
 
     public static Rendered render(NotificationType type, Map<String, Object> params) {
         return switch (type) {
-                        case PICKUP_ACCEPTED -> new Rendered(
+            case PICKUP_ACCEPTED -> new Rendered(
                 "Pickup accepted",
                 "A partner has accepted your pickup request and will be in touch shortly."
             );
@@ -31,11 +31,15 @@ public final class NotificationTemplates {
                 "Pickup complete",
                 "Your pickup has been completed. Thank you for recycling responsibly."
             );
+            case PICKUP_DELIVERED -> new Rendered(
+                "E-waste delivered to warehouse",
+                "Your e-waste has been delivered to the recycling warehouse. Points have been added to your account."
+            );
             case PICKUP_REASSIGNED -> new Rendered(
                 "Pickup reassigned",
                 "Your pickup has been reassigned to a different partner."
             );
-                        case PARTNER_APPROVED -> new Rendered(
+            case PARTNER_APPROVED -> new Rendered(
                 "Partner account approved",
                 "Great news — your partner application has been approved. You can now accept pickup offers."
             );
@@ -62,4 +66,3 @@ public final class NotificationTemplates {
         return s.length() <= 8 ? s : s.substring(0, 8);
     }
 }
-

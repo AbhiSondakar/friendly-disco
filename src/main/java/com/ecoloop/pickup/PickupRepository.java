@@ -23,20 +23,20 @@ public interface PickupRepository extends JpaRepository<PickupRequest,UUID>, Jpa
     @Query("SELECT p FROM PickupRequest p WHERE p.userId = :userId AND p.deviceId = :deviceId AND p.status NOT IN ('completed', 'cancelled')")
     Optional<PickupRequest> findActiveByUserIdAndDeviceId(@Param("userId") UUID userId, @Param("deviceId") UUID deviceId);
 
-    @Query("SELECT COUNT(p) FROM PickupRequest p WHERE p.partnerId = :partnerId AND p.status IN ('accepted', 'verified') AND p.userId NOT IN (SELECT u.id FROM com.ecoloop.identity.User u WHERE u.deletedAt IS NOT NULL)")
+    @Query("SELECT COUNT(p) FROM PickupRequest p WHERE p.partnerId = :partnerId AND p.status IN ('assigned', 'in_transit', 'collected', 'accepted', 'verified') AND p.userId NOT IN (SELECT u.id FROM com.ecoloop.identity.User u WHERE u.deletedAt IS NOT NULL)")
     long countActiveJobsByPartnerId(@Param("partnerId") UUID partnerId);
 
-    @Query("SELECT p.partnerId, COUNT(p) FROM PickupRequest p WHERE p.partnerId IN :partnerIds AND p.status IN ('accepted', 'verified') AND p.userId NOT IN (SELECT u.id FROM com.ecoloop.identity.User u WHERE u.deletedAt IS NOT NULL) GROUP BY p.partnerId")
+    @Query("SELECT p.partnerId, COUNT(p) FROM PickupRequest p WHERE p.partnerId IN :partnerIds AND p.status IN ('assigned', 'in_transit', 'collected', 'accepted', 'verified') AND p.userId NOT IN (SELECT u.id FROM com.ecoloop.identity.User u WHERE u.deletedAt IS NOT NULL) GROUP BY p.partnerId")
     List<Object[]> countActiveJobsByPartnerIds(@Param("partnerIds") Collection<UUID> partnerIds);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT p FROM PickupRequest p WHERE p.id = :id")
     Optional<PickupRequest> findByIdForUpdate(@Param("id") UUID id);
 
-    @Query("SELECT DISTINCT p.userId FROM PickupRequest p WHERE p.partnerId = :partnerId AND p.status IN ('accepted', 'verified')")
+    @Query("SELECT DISTINCT p.userId FROM PickupRequest p WHERE p.partnerId = :partnerId AND p.status IN ('assigned', 'in_transit', 'collected', 'accepted', 'verified')")
     List<UUID> findDistinctHouseholdUserIdsByPartnerAssigned(@Param("partnerId") UUID partnerId);
 
-    @Query("SELECT p FROM PickupRequest p WHERE p.partnerId = :partnerId AND p.status IN ('accepted', 'verified')")
+    @Query("SELECT p FROM PickupRequest p WHERE p.partnerId = :partnerId AND p.status IN ('assigned', 'in_transit', 'collected', 'accepted', 'verified')")
     List<PickupRequest> findActiveAssignedToPartner(@Param("partnerId") UUID partnerId);
 
     /**
