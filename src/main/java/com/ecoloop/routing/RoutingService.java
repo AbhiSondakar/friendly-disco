@@ -177,13 +177,34 @@ public class RoutingService {
         }
 
         String category = null;
+        String aiCategory = null;
         if (pickup.getDeviceId() != null) {
-            category = devices.findById(pickup.getDeviceId()).map(Device::getCategory).orElse(null);
+            Optional<Device> devOpt = devices.findById(pickup.getDeviceId());
+            if (devOpt.isPresent()) {
+                category = devOpt.get().getCategory();
+                aiCategory = devOpt.get().getAiCategory();
+            }
         }
 
-        List<Partner> approvedPartners = partners.findAllByStatus("approved");
+        boolean categoryNeedsReview = "other".equalsIgnoreCase(category) || "other".equalsIgnoreCase(aiCategory);
+
+        List<Partner> allApproved = partners.findAllByStatus("approved");
+        List<Partner> approvedPartners;
+
+        if (categoryNeedsReview) {
+            // ONLY route to our internal organization
+            approvedPartners = allApproved.stream()
+                .filter(p -> "internal".equalsIgnoreCase(p.getType()))
+                .toList();
+        } else {
+            // Route to any regular external partner
+            approvedPartners = allApproved.stream()
+                .filter(p -> p.getType() == null || !"internal".equalsIgnoreCase(p.getType()))
+                .toList();
+        }
+
         if (approvedPartners.isEmpty()) {
-            log.info("No approved partners found for pickup {}", pickupId);
+            log.info("No approved partners found for pickup {} (internalOnly={})", pickupId, categoryNeedsReview);
             return 0;
         }
 
