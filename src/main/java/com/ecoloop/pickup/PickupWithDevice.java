@@ -19,6 +19,12 @@ public record PickupWithDevice(
     Instant completedAt,
     Instant createdAt,
     Instant updatedAt,
+    // Embedded verification details
+    String verifiedCategory,
+    String verifiedCondition,
+    String verificationNotes,
+    Instant verifiedAt,
+    UUID verifiedBy,
     // Embedded device details for the frontend
     String deviceCategory,
     String deviceCondition,
@@ -37,6 +43,7 @@ public record PickupWithDevice(
                 pickup.getPartnerId(), pickup.getStatus(), pickup.getAddress(),
                 pickup.getScheduledAt(), pickup.getCompletedAt(),
                 pickup.getCreatedAt(), pickup.getUpdatedAt(),
+                pickup.getVerifiedCategory(), pickup.getVerifiedCondition(), pickup.getVerificationNotes(), pickup.getVerifiedAt(), pickup.getVerifiedBy(),
                 null, null, null, null, null, null,
                 partnerName
             );
@@ -46,6 +53,7 @@ public record PickupWithDevice(
             pickup.getPartnerId(), pickup.getStatus(), pickup.getAddress(),
             pickup.getScheduledAt(), pickup.getCompletedAt(),
             pickup.getCreatedAt(), pickup.getUpdatedAt(),
+            pickup.getVerifiedCategory(), pickup.getVerifiedCondition(), pickup.getVerificationNotes(), pickup.getVerifiedAt(), pickup.getVerifiedBy(),
             device.getCategory(), device.getCondition(), device.getImageUrl(),
             device.getAiCategory(), device.getAiConfidence(), device.getAiStatus(),
             partnerName
