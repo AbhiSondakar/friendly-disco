@@ -189,19 +189,7 @@ public class RoutingService {
         boolean categoryNeedsReview = "other".equalsIgnoreCase(category) || "other".equalsIgnoreCase(aiCategory);
 
         List<Partner> allApproved = partners.findAllByStatus("approved");
-        List<Partner> approvedPartners;
-
-        if (categoryNeedsReview) {
-            // ONLY route to our internal organization
-            approvedPartners = allApproved.stream()
-                .filter(p -> "internal".equalsIgnoreCase(p.getType()))
-                .toList();
-        } else {
-            // Route to any regular external partner
-            approvedPartners = allApproved.stream()
-                .filter(p -> p.getType() == null || !"internal".equalsIgnoreCase(p.getType()))
-                .toList();
-        }
+        List<Partner> approvedPartners = allApproved; // Route to ANY approved partner, ignoring internal/external
 
         if (approvedPartners.isEmpty()) {
             log.info("No approved partners found for pickup {} (internalOnly={})", pickupId, categoryNeedsReview);
