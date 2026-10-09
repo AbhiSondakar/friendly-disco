@@ -37,7 +37,7 @@ public class Partner {
     private int capacity = 10;
 
     @Column(precision = 3, scale = 2)
-    private BigDecimal rating = BigDecimal.ZERO;
+    private BigDecimal rating = new BigDecimal("5.00");
 
     @Column(name = "license_upload_id")
     private UUID licenseUploadId;

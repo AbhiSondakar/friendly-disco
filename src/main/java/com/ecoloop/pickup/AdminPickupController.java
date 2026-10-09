@@ -50,6 +50,14 @@ public class AdminPickupController {
             pickupPage.getNumber(), pickupPage.getSize());
   }
 
+  @PreAuthorize("hasRole('ADMIN')")
+  @GetMapping("/escalated")
+  public List<PickupWithDevice> escalated() {
+    // Pickups that auto-routing could not place: pending, unassigned, no live offers.
+    // Admins assign a partner manually from this queue via the reassign endpoint.
+    return pickupService.enrich(pickups.findUnassignedWithoutActiveOffers(Instant.now()));
+  }
+
   public record ReassignRequest(
       @NotNull(message = "newPartnerId is required")
       @JsonAlias("partnerId")

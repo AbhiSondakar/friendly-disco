@@ -135,6 +135,7 @@ public class RoutingService {
     @EventListener
     @Transactional
     public void onPickupCreated(PickupCreatedEvent event) {
+        boolean categoryNeedsReview = false;
         Optional<PickupRequest> pickupOpt = pickups.findById(event.pickupId());
         if (pickupOpt.isPresent()) {
             PickupRequest pickup = pickupOpt.get();
@@ -143,17 +144,21 @@ public class RoutingService {
                 if (dev.isPresent()) {
                     String cat = dev.get().getCategory();
                     String aiCat = dev.get().getAiCategory();
-                    if ("other".equalsIgnoreCase(cat) || "other".equalsIgnoreCase(aiCat)) {
-                        escalateToAdminQueue(event.pickupId(), "Category 'other' requires manual approval");
-                        return;
-                    }
+                    categoryNeedsReview = "other".equalsIgnoreCase(cat) || "other".equalsIgnoreCase(aiCat);
                 }
             }
         }
 
+        // Route to partners even when the AI flagged the category as 'other'/manual-review:
+        // the assigned partner re-verifies the category at pickup time (verifyBy), so a
+        // low-confidence classification must not strand the household without a partner.
         int dispatched = createTopNOffers(event.pickupId(), 1);
         if (dispatched == 0) {
             escalateToAdminQueue(event.pickupId(), "No eligible partners available for initial routing");
+            return;
+        }
+        if (categoryNeedsReview) {
+            flagCategoryForAdminReview(event.pickupId());
         }
     }
 
@@ -327,6 +332,41 @@ public class RoutingService {
                 pickupId,
                 "ESCALATED",
                 Map.of("reason", reason)
+            );
+        }
+    }
+
+    /**
+     * Notifies admins that a pickup was auto-classified as 'other' (manual review) while
+     * routing to partners continues normally. Unlike {@link #escalateToAdminQueue}, the
+     * household is NOT told routing is delayed — it is not. Reuses the existing
+     * 'pickup_routing_escalated' notification type to satisfy ck_notifications_type.
+     */
+    @Transactional
+    public void flagCategoryForAdminReview(UUID pickupId) {
+        log.info("Flagging pickup {} for admin category review (routing to partners continues)", pickupId);
+        if (users != null && notificationService != null) {
+            List<User> admins = users.findAllByRole("ADMIN");
+            for (User admin : admins) {
+                notificationService.create(
+                    admin.getId(),
+                    "pickup_routing_escalated",
+                    "Pickup Category Needs Review",
+                    "Pickup " + pickupId + " was auto-classified as 'other' and flagged for review, " +
+                        "but it has been routed to partners. Please verify the device category."
+                );
+            }
+        }
+
+        if (auditService != null) {
+            auditService.record(
+                null,
+                "SYSTEM",
+                "pickup.category_review",
+                "pickup_requests",
+                pickupId,
+                "FLAGGED",
+                Map.of("reason", "Category 'other' auto-flagged for admin review; routing proceeded")
             );
         }
     }

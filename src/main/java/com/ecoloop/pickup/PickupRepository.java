@@ -38,4 +38,14 @@ public interface PickupRepository extends JpaRepository<PickupRequest,UUID>, Jpa
 
     @Query("SELECT p FROM PickupRequest p WHERE p.partnerId = :partnerId AND p.status IN ('accepted', 'verified')")
     List<PickupRequest> findActiveAssignedToPartner(@Param("partnerId") UUID partnerId);
+
+    /**
+     * Admin assignment queue: pending pickups with no partner and no live routing offer.
+     * Covers "no eligible partners" escalations, all-offers-expired/rejected pickups, and
+     * legacy pickups stranded before routing fixes — anything that needs a manual assignment.
+     */
+    @Query("SELECT p FROM PickupRequest p WHERE p.status = 'pending' AND p.partnerId IS NULL "
+        + "AND NOT EXISTS (SELECT o FROM RoutingOffer o WHERE o.pickupId = p.id AND o.status = 'offered' "
+        + "AND (o.expiresAt IS NULL OR o.expiresAt > :now)) ORDER BY p.createdAt ASC")
+    List<PickupRequest> findUnassignedWithoutActiveOffers(@Param("now") Instant now);
 }
