@@ -42,6 +42,17 @@ spring:
   data:
     redis:
       url: ${REDIS_URL:redis://localhost:6379}
+  mail:
+    host: ${SPRING_MAIL_HOST:}
+    port: ${SPRING_MAIL_PORT:587}
+    username: ${SPRING_MAIL_USERNAME:}
+    password: ${SPRING_MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
   servlet:
     multipart:
       max-file-size: 5MB
@@ -55,6 +66,14 @@ management:
     health:
       show-details: when-authorized
 ecoloop:
+  mail:
+    # Envelope sender for all outbound email (e.g. noreply@ecoloop.app).
+    # Must be set in production via ECOLOOP_MAIL_FROM.
+    from: ${ECOLOOP_MAIL_FROM:noreply@ecoloop.local}
+    # Base URL for the password-reset deep-link.
+    # Production value: ecoloop://reset-password  (opens the Android app directly).
+    # Alternatively point to a web redirect page: https://app.ecoloop.app/reset-password
+    reset-base-url: ${ECOLOOP_MAIL_RESET_BASE_URL:ecoloop://reset-password}
   ai:
     provider: ${ECOLOOP_AI_PROVIDER:stub}
     max-concurrent-classifications: ${ECOLOOP_MAX_CONCURRENT_CLASSIFICATIONS:1}

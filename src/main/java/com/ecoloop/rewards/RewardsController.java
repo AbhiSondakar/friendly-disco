@@ -21,9 +21,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import org.springframework.security.access.prepost.PreAuthorize;
+
 @RestController
 @RequestMapping("/api/rewards")
 @Validated
+@PreAuthorize("hasRole('HOUSEHOLD')")
 public class RewardsController {
     private static final Logger log = LoggerFactory.getLogger(RewardsController.class);
 

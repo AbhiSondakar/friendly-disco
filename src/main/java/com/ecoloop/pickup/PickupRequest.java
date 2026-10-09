@@ -1,7 +1,6 @@
 package com.ecoloop.pickup;
 
 import com.ecoloop.common.security.ActorContext;
-import com.ecoloop.routing.RoutingOffer;
 import jakarta.persistence.*;
 import org.springframework.data.domain.AbstractAggregateRoot;
 import org.springframework.security.access.AccessDeniedException;
@@ -31,6 +30,12 @@ public class PickupRequest extends AbstractAggregateRoot<PickupRequest> {
 
     @Column(columnDefinition = "TEXT")
     private String address;
+
+    @Column(name = "pickup_lat")
+    private Double pickupLat;
+
+    @Column(name = "pickup_lon")
+    private Double pickupLon;
 
     @Column(name = "scheduled_at")
     private Instant scheduledAt;
@@ -82,6 +87,10 @@ public class PickupRequest extends AbstractAggregateRoot<PickupRequest> {
     public void setStatus(String status) { this.status = status; }
     public String getAddress() { return address; }
     public void setAddress(String address) { this.address = address; }
+    public Double getPickupLat() { return pickupLat; }
+    public void setPickupLat(Double pickupLat) { this.pickupLat = pickupLat; }
+    public Double getPickupLon() { return pickupLon; }
+    public void setPickupLon(Double pickupLon) { this.pickupLon = pickupLon; }
     public Instant getScheduledAt() { return scheduledAt; }
     public void setScheduledAt(Instant scheduledAt) { this.scheduledAt = scheduledAt; }
     public Instant getCompletedAt() { return completedAt; }
@@ -112,30 +121,6 @@ public class PickupRequest extends AbstractAggregateRoot<PickupRequest> {
         return domainEvents();
     }
 
-    public PickupRequest acceptBy(ActorContext actor, RoutingOffer offer) {
-        if (actor == null || !actor.isPartner()) {
-            throw new AccessDeniedException("Only approved partners can accept pickups");
-        }
-        if (offer == null) {
-            throw new AccessDeniedException("Offer is required to accept pickup");
-        }
-        if (!this.id.equals(offer.getPickupId())) {
-            throw new IllegalStateException("Offer is not for this pickup");
-        }
-        if (actor.partnerId() != null && !actor.partnerId().equals(offer.getPartnerId())) {
-            throw new AccessDeniedException("Offer does not belong to this partner");
-        }
-        if (!"pending".equals(this.status)) {
-            throw new IllegalStateException("Pickup is no longer pending (current: " + this.status + ")");
-        }
-
-        this.partnerId = offer.getPartnerId();
-        this.status = "accepted";
-        this.updatedAt = Instant.now();
-        registerEvent(new PickupAcceptedEvent(this.id, this.partnerId));
-        return this;
-    }
-
     public PickupRequest cancelBy(ActorContext actor) {
         if (actor == null || (!actor.isHousehold() && !actor.isAdmin())) {
             throw new AccessDeniedException("Only households can cancel their pickups");
@@ -150,26 +135,6 @@ public class PickupRequest extends AbstractAggregateRoot<PickupRequest> {
         this.status = "cancelled";
         this.updatedAt = Instant.now();
         registerEvent(new PickupCancelledEvent(this.id));
-        return this;
-    }
-
-    public PickupRequest rejectBy(ActorContext actor, String reason) {
-        if (actor == null || !actor.isPartner()) {
-            throw new AccessDeniedException("Only assigned partner can reject pickup");
-        }
-        if (actor.partnerId() == null || !actor.partnerId().equals(this.partnerId)) {
-            throw new AccessDeniedException("Pickup is not assigned to this partner");
-        }
-        if (!"accepted".equals(this.status)) {
-            throw new IllegalStateException("Invalid pickup state transition");
-        }
-
-        UUID prevPartner = this.partnerId;
-        this.partnerId = null;
-        this.status = "pending";
-        this.updatedAt = Instant.now();
-        registerEvent(new PickupRejectedEvent(this.id, prevPartner));
-        registerEvent(new PickupCreatedEvent(this.id));
         return this;
     }
 
@@ -264,3 +229,4 @@ public class PickupRequest extends AbstractAggregateRoot<PickupRequest> {
         this.updatedAt = Instant.now();
     }
 }
+

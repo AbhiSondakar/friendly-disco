@@ -35,9 +35,6 @@ class UserSoftDeleteTest {
     private UserRepository userRepository;
 
     @Autowired
-    private PushTokenRepository pushTokenRepository;
-
-    @Autowired
     private AdminUserController adminUserController;
 
     @Autowired
@@ -202,10 +199,6 @@ class UserSoftDeleteTest {
         rewardLedgerRepository.saveAndFlush(
                 new RewardLedger(piiUser.getId(), 150, "earn", "Initial recycle reward", UUID.randomUUID()));
 
-        // Add push token
-        pushTokenRepository.saveAndFlush(new PushToken(piiUser.getId(), "token-to-delete-123", "ios"));
-        assertFalse(pushTokenRepository.findAllByUserId(piiUser.getId()).isEmpty());
-
         // Soft delete user via UserService
         userService.softDeleteUser(piiUser.getId());
         piiUser = userRepository.findById(piiUser.getId()).orElseThrow();
@@ -225,10 +218,6 @@ class UserSoftDeleteTest {
         // Verify ledger is intact (GDPR ledger preservation)
         assertEquals(150, rewardLedgerRepository.balance(piiUser.getId()),
                 "Reward ledger history must remain intact after soft-delete");
-
-        // Verify push tokens are purged
-        assertTrue(pushTokenRepository.findAllByUserId(piiUser.getId()).isEmpty(),
-                "Push tokens must be deleted upon soft delete");
 
         // Verify former email and phone are freed for re-registration
         User reRegistered = new User(originalEmail, "hash2", "New User Same Email", "HOUSEHOLD");

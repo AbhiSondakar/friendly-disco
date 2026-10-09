@@ -6,7 +6,6 @@ import com.ecoloop.partner.PartnerApprovedEvent;
 import com.ecoloop.partner.PartnerRepository;
 import com.ecoloop.partner.PartnerSuspendedEvent;
 import com.ecoloop.pickup.*;
-import com.ecoloop.routing.RoutingOfferRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -28,38 +27,24 @@ public class NotificationListener {
     private static final Logger log = LoggerFactory.getLogger(NotificationListener.class);
 
     private final NotificationService notifications;
-    private final RoutingOfferRepository offers;
-    private final PickupRepository pickups;
+        private final PickupRepository pickups;
     private final PartnerRepository partners;
     private final NotificationPreferenceRepository preferences;
     private final NotificationDeliveryHandler deliveryHandler;
 
     public NotificationListener(NotificationService notifications,
-                                RoutingOfferRepository offers,
                                 PickupRepository pickups,
                                 PartnerRepository partners,
                                 NotificationPreferenceRepository preferences,
                                 NotificationDeliveryHandler deliveryHandler) {
         this.notifications = notifications;
-        this.offers = offers;
         this.pickups = pickups;
         this.partners = partners;
         this.preferences = preferences;
         this.deliveryHandler = deliveryHandler;
     }
 
-    @Transactional(propagation = Propagation.NOT_SUPPORTED)
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-    public void onPickupCreated(PickupCreatedEvent event) {
-        UUID pickupId = event.pickupId();
-        List<UUID> partnerUserIds = offers.findOfferedPartnerUserIdsByPickupId(pickupId);
-        var gate = gate(NotificationType.OFFER_RECEIVED);
-        for (UUID userId : partnerUserIds) {
-            Notification n = notifications.create(userId, NotificationType.OFFER_RECEIVED, pickupId, Map.of("pickupId", pickupId));
-            deliveryHandler.offerIfEnabled(userId, NotificationType.OFFER_RECEIVED, n, gate);
-        }
-        log.debug("PickupCreated event fan-out: pickupId={} offeredPartners={}", pickupId, partnerUserIds.size());
-    }
+
 
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
@@ -70,14 +55,7 @@ public class NotificationListener {
             var householdGate = gate(NotificationType.PICKUP_ACCEPTED);
             Notification hh = notifications.create(pickup.getUserId(), NotificationType.PICKUP_ACCEPTED, pickupId, Map.of("pickupId", pickupId, "partnerId", acceptedPartnerId));
             deliveryHandler.offerIfEnabled(pickup.getUserId(), NotificationType.PICKUP_ACCEPTED, hh, householdGate);
-
-            List<UUID> supersededUserIds = offers.findSupersededPartnerUserIdsByPickupId(pickupId, acceptedPartnerId);
-            var supersededGate = gate(NotificationType.OFFER_SUPERSEDED);
-            for (UUID partnerUserId : supersededUserIds) {
-                Notification n = notifications.create(partnerUserId, NotificationType.OFFER_SUPERSEDED, pickupId, Map.of("pickupId", pickupId, "acceptedPartnerId", acceptedPartnerId));
-                deliveryHandler.offerIfEnabled(partnerUserId, NotificationType.OFFER_SUPERSEDED, n, supersededGate);
-            }
-            log.debug("PickupAccepted event fan-out: pickupId={} household={} superseded={}", pickupId, pickup.getUserId(), supersededUserIds.size());
+            log.debug("PickupAccepted event fan-out: pickupId={} household={}", pickupId, pickup.getUserId());
         });
     }
 
@@ -98,13 +76,12 @@ public class NotificationListener {
     public void onPickupCancelled(PickupCancelledEvent event) {
         UUID pickupId = event.pickupId();
         pickups.findById(pickupId).ifPresent(pickup -> {
-            // Assigned partner (accepted jobs) OR partners whose open offers RoutingService just cancelled.
+            // Assigned partner (accepted jobs)
             Set<UUID> recipients = new LinkedHashSet<>();
             UUID partnerId = pickup.getPartnerId();
             if (partnerId != null) {
                 partners.findUserIdByPartnerId(partnerId).ifPresent(recipients::add);
             }
-            recipients.addAll(offers.findCancelledOfferPartnerUserIdsByPickupId(pickupId));
             if (recipients.isEmpty()) {
                 log.debug("PickupCancelled event with no partner recipients. pickupId={}", pickupId);
                 return;
@@ -201,8 +178,6 @@ public class NotificationListener {
     private GatePredicate gate(NotificationType type) {
         NotificationPreference defaults = new NotificationPreference(null);
         Map<NotificationType, java.util.function.Function<NotificationPreference, Boolean>> mapping = new HashMap<>();
-        mapping.put(NotificationType.OFFER_RECEIVED, NotificationPreference::getOfferAlerts);
-        mapping.put(NotificationType.OFFER_SUPERSEDED, NotificationPreference::getOfferAlerts);
         mapping.put(NotificationType.PICKUP_ACCEPTED, NotificationPreference::getPickupUpdates);
         mapping.put(NotificationType.PICKUP_REOFFERED, NotificationPreference::getPickupUpdates);
         mapping.put(NotificationType.PICKUP_VERIFIED, NotificationPreference::getPickupUpdates);
@@ -221,3 +196,4 @@ public class NotificationListener {
         boolean isDeliveryEnabledFor(NotificationPreference pref);
     }
 }
+

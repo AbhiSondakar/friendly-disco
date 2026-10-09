@@ -5,16 +5,16 @@ import java.util.Locale;
 import java.util.Map;
 
 public enum NotificationType {
-    OFFER_RECEIVED("offer_received"),
-    OFFER_SUPERSEDED("offer_superseded"),
+    
+    
     PICKUP_ACCEPTED("pickup_accepted"),
     PICKUP_REOFFERED("pickup_reoffered"),
     PICKUP_CANCELLED("pickup_cancelled"),
     PICKUP_VERIFIED("pickup_verified"),
     PICKUP_COMPLETED("pickup_completed"),
     PICKUP_REASSIGNED("pickup_reassigned"),
-    PICKUP_ROUTING_ESCALATED("pickup_routing_escalated"),
-    PICKUP_ROUTING_DELAYED("pickup_routing_delayed"),
+    
+    
     PARTNER_APPROVED("partner_approved"),
     PARTNER_SUSPENDED("partner_suspended"),
     PARTNER_CHANGED("partner_changed");

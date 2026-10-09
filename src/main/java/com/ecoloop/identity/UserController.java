@@ -20,18 +20,16 @@ public class UserController {
 
     private final UserRepository users;
     private final PasswordEncoder encoder;
-    private final PushTokenRepository pushTokens;
     private final NotificationPreferenceRepository notificationPrefs;
     private final com.ecoloop.rewards.RewardLedgerRepository ledger;
     private final SessionRevocationService sessionRevocationService;
 
-    public UserController(UserRepository users, PasswordEncoder encoder, PushTokenRepository pushTokens,
+    public UserController(UserRepository users, PasswordEncoder encoder,
                           NotificationPreferenceRepository notificationPrefs,
                           com.ecoloop.rewards.RewardLedgerRepository ledger,
                           SessionRevocationService sessionRevocationService) {
         this.users = users;
         this.encoder = encoder;
-        this.pushTokens = pushTokens;
         this.notificationPrefs = notificationPrefs;
         this.ledger = ledger;
         this.sessionRevocationService = sessionRevocationService;
@@ -102,10 +100,6 @@ public class UserController {
         log.info("License uploaded for user {}", current(request).getId());
     }
 
-    public record PushTokenRequest(
-        @NotBlank String token,
-        String platform) {}
-
     @GetMapping("/notification-prefs")
     public Map<String, Object> getNotificationPrefs(HttpServletRequest request) {
         UUID uid = current(request).getId();
@@ -121,7 +115,7 @@ public class UserController {
             .orElseGet(() -> new NotificationPreference(uid));
         pref.setPickupUpdates(body.pickupUpdates);
         pref.setPointsUpdates(body.pointsUpdates);
-        pref.setOfferAlerts(body.offerAlerts);
+        
         pref.setUpdatedAt(Instant.now());
         notificationPrefs.save(pref);
         log.info("Notification prefs updated: user={}", uid);
@@ -131,18 +125,9 @@ public class UserController {
     private static Map<String, Object> prefsMap(NotificationPreference p) {
         return Map.of(
             "pickupUpdates", p.getPickupUpdates(),
-            "pointsUpdates", p.getPointsUpdates(),
-            "offerAlerts", p.getOfferAlerts()
+            "pointsUpdates", p.getPointsUpdates()
         );
     }
 
-    public record NotificationPrefs(boolean pickupUpdates, boolean pointsUpdates, boolean offerAlerts) {}
-
-    @PostMapping("/push-token")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void savePushToken(@Valid @RequestBody PushTokenRequest body, HttpServletRequest request) {
-        UUID userId = current(request).getId();
-        pushTokens.save(new PushToken(userId, body.token(),
-            body.platform() != null ? body.platform() : "unknown"));
-    }
+    public record NotificationPrefs(boolean pickupUpdates, boolean pointsUpdates) {}
 }

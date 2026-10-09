@@ -10,10 +10,6 @@ import com.ecoloop.pickup.PickupRepository;
 import com.ecoloop.pickup.PickupRequest;
 import com.ecoloop.pickup.PickupService;
 import com.ecoloop.pickup.VerifyRequest;
-import com.ecoloop.routing.RoutingOffer;
-import com.ecoloop.routing.RoutingOfferDto;
-import com.ecoloop.routing.RoutingOfferRepository;
-import com.ecoloop.routing.RoutingService;
 import com.ecoloop.rewards.RewardLedgerRepository;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -38,26 +34,21 @@ public class PartnerController {
 
     private final PartnerRepository partners;
     private final UserRepository users;
-    private final RoutingOfferRepository offers;
     private final PickupRepository pickups;
     private final RewardLedgerRepository ledger;
     private final IdentityService identityService;
-    private final RoutingService routingService;
     private final PickupService pickupService;
     private final FileStorageService fileStorageService;
 
     public PartnerController(PartnerRepository partners, UserRepository users,
-                             RoutingOfferRepository offers, PickupRepository pickups,
-                             RewardLedgerRepository ledger, IdentityService identityService,
-                             RoutingService routingService, PickupService pickupService,
+                             PickupRepository pickups, RewardLedgerRepository ledger,
+                             IdentityService identityService, PickupService pickupService,
                              FileStorageService fileStorageService) {
         this.partners = partners;
         this.users = users;
-        this.offers = offers;
         this.pickups = pickups;
         this.ledger = ledger;
         this.identityService = identityService;
-        this.routingService = routingService;
         this.pickupService = pickupService;
         this.fileStorageService = fileStorageService;
     }
@@ -102,14 +93,7 @@ public class PartnerController {
         return Map.of("uploadId", stored.metadata().getId(), "url", stored.publicUri());
     }
 
-    @GetMapping("/offers")
-    @PreAuthorize("hasRole('PARTNER')")
-    public List<RoutingOfferDto> offers(HttpServletRequest request) {
-        Partner partner = currentPartner(request);
-        return offers.findAllByPartnerIdOrderByCreatedAtDesc(partner.getId()).stream()
-            .map(RoutingOfferDto::from)
-            .toList();
-    }
+    
 
     @GetMapping("/jobs")
     @PreAuthorize("hasRole('PARTNER')")
@@ -128,7 +112,10 @@ public class PartnerController {
         String orgName,
         String serviceAreas,
         String capabilities,
-        Integer capacity) {}
+        Integer capacity,
+        String facilityAddress,
+        Double facilityLat,
+        Double facilityLon) {}
 
     @PatchMapping("/me")
     @PreAuthorize("hasRole('PARTNER')")
@@ -138,6 +125,9 @@ public class PartnerController {
         if (body.serviceAreas() != null) partner.setServiceAreas(body.serviceAreas());
         if (body.capabilities() != null) partner.setCapabilities(body.capabilities());
         if (body.capacity() != null) partner.setCapacity(body.capacity());
+        if (body.facilityAddress() != null) partner.setFacilityAddress(body.facilityAddress());
+        if (body.facilityLat() != null) partner.setFacilityLat(body.facilityLat());
+        if (body.facilityLon() != null) partner.setFacilityLon(body.facilityLon());
         partner.setUpdatedAt(Instant.now());
         return PartnerDto.from(partners.save(partner), true);
     }
@@ -162,8 +152,6 @@ public class PartnerController {
         Instant today = java.time.LocalDate.now(java.time.ZoneOffset.UTC).atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
         Instant monthStart = java.time.LocalDate.now(java.time.ZoneOffset.UTC).withDayOfMonth(1).atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
 
-        long offersToday = offers.findAllByPartnerIdOrderByCreatedAtDesc(partnerId).stream()
-            .filter(o -> o.getCreatedAt().isAfter(today)).count();
         long activeJobs = pickups.countActiveJobsByPartnerId(partnerId);
         long monthlyCompletions = pickups.findAllByPartnerId(partnerId).stream()
             .filter(p -> "completed".equals(p.getStatus()))
@@ -171,19 +159,11 @@ public class PartnerController {
             .filter(p -> users.findById(p.getUserId()).map(u -> !u.isDeleted()).orElse(false))
             .count();
         int pointsBalance = ledger.balance(partner.getUserId());
-        Instant nextOfferAt = offers.findAllByPartnerIdOrderByCreatedAtDesc(partnerId).stream()
-            .filter(o -> "offered".equals(o.getStatus()))
-            .map(RoutingOffer::getExpiresAt)
-            .filter(Objects::nonNull)
-            .min(Instant::compareTo)
-            .orElse(null);
 
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("offersToday", offersToday);
         result.put("activeJobs", activeJobs);
         result.put("monthlyCompletions", monthlyCompletions);
         result.put("pointsBalance", pointsBalance);
-        result.put("nextOfferAt", nextOfferAt != null ? nextOfferAt.toString() : null);
         result.put("capacityUsed", activeJobs);
         result.put("capacityTotal", partner.getCapacity());
         return result;
@@ -201,20 +181,9 @@ public class PartnerController {
         return pickupService.enrich(pickup);
     }
 
-    @PostMapping("/offers/{id}/accept")
-    @PreAuthorize("hasRole('PARTNER')")
-    public RoutingOfferDto acceptOffer(@PathVariable UUID id, ActorContext actor) {
-        return RoutingOfferDto.from(routingService.acceptOffer(actor.userId(), id));
-    }
+    
 
-    @PostMapping("/offers/{id}/reject")
-    @PreAuthorize("hasRole('PARTNER')")
-    public RoutingOfferDto rejectOffer(@PathVariable UUID id,
-                                       @RequestBody(required = false) Map<String, String> body,
-                                       HttpServletRequest request) {
-        String reason = body != null ? body.get("reason") : null;
-        return RoutingOfferDto.from(routingService.rejectOffer(SessionUser.require(request).id(), id, reason));
-    }
+    
 
     @PostMapping("/jobs/{id}/verify")
     @PreAuthorize("hasRole('PARTNER')")
@@ -252,3 +221,4 @@ public class PartnerController {
         return partner;
     }
 }
+

@@ -33,19 +33,51 @@ public class PartnerLifecycleService {
     private final AuditService auditService;
     private final PickupRepository pickups;
     private final ApplicationEventPublisher events;
+    private final org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
 
     public PartnerLifecycleService(PartnerRepository partners,
                                    UserRepository users,
                                    SessionRevocationService sessionRevocationService,
                                    AuditService auditService,
                                    PickupRepository pickups,
-                                   ApplicationEventPublisher events) {
+                                   ApplicationEventPublisher events,
+                                   org.springframework.security.crypto.password.PasswordEncoder passwordEncoder) {
         this.partners = partners;
         this.users = users;
         this.sessionRevocationService = sessionRevocationService;
         this.auditService = auditService;
         this.pickups = pickups;
         this.events = events;
+        this.passwordEncoder = passwordEncoder;
+    }
+
+    @Transactional
+    public Partner createPartner(String email, String password, String orgName, String type, String licenseNo, String serviceAreas) {
+        String normalizedEmail = User.normalizeEmail(email);
+        if (users.findByEmailIgnoreCase(normalizedEmail).isPresent()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Email already registered");
+        }
+
+        User u = new User(normalizedEmail, passwordEncoder.encode(password), orgName.trim(), Role.PARTNER.name());
+        u.setActive(true);
+        u.setEmailVerified(true); // Admin created, so we consider it verified
+        u.setCreatedAt(Instant.now());
+        u.setUpdatedAt(Instant.now());
+        users.save(u);
+
+        Partner partner = new Partner(u.getId(), orgName.trim(), type, licenseNo);
+        if (serviceAreas != null && !serviceAreas.isBlank()) {
+            partner.setServiceAreas(serviceAreas.trim());
+        }
+        partner.setStatus("approved"); // Auto-approved since admin created it
+        partner.setCreatedAt(Instant.now());
+        partner.setUpdatedAt(Instant.now());
+        
+        partner = partners.save(partner);
+        log.info("Partner created by admin: partnerId={}, userId={}", partner.getId(), u.getId());
+        
+        // Optional: register audit log if needed
+        return partner;
     }
 
     @Transactional

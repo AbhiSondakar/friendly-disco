@@ -20,7 +20,6 @@ import java.util.concurrent.ConcurrentHashMap;
  * Behavior today:
  * - Row creation is always handled by NotificationListener calling NotificationService.create.
  * - External delivery is a no-op; preferences are loaded and the decision is traced at DEBUG.
- * - push_tokens table continues to collect tokens for future use (documented in PROJECT.md §16, Deferred).
  */
 @Component
 public class NotificationDeliveryHandler {

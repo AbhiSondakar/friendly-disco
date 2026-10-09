@@ -65,7 +65,7 @@ class NotificationPreferenceTest {
     void rowAlwaysWrittenEvenWhenPreferenceIsDisabled() {
         NotificationPreference pref = new NotificationPreference(householdId);
         pref.setPickupUpdates(false);
-        pref.setOfferAlerts(false);
+        
         preferences.saveAndFlush(pref);
 
         Notification n = service.create(householdId, NotificationType.PICKUP_ACCEPTED, pickupId, Map.of("pickupId", pickupId));

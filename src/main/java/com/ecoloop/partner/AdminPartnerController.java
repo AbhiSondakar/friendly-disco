@@ -49,6 +49,23 @@ public class AdminPartnerController {
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Partner not found"));
     }
 
+    public record AdminCreatePartnerRequest(
+        @jakarta.validation.constraints.NotBlank @jakarta.validation.constraints.Email String email,
+        @jakarta.validation.constraints.NotBlank @jakarta.validation.constraints.Size(min = 12, max = 128) String password,
+        @jakarta.validation.constraints.NotBlank String orgName,
+        String type,
+        String licenseNo,
+        String serviceAreas
+    ) {}
+
+    @PreAuthorize("hasRole('ADMIN')")
+    @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
+    public PartnerDto create(@jakarta.validation.Valid @RequestBody AdminCreatePartnerRequest req) {
+        Partner p = lifecycleService.createPartner(req.email(), req.password(), req.orgName(), req.type(), req.licenseNo(), req.serviceAreas());
+        return PartnerDto.from(p, true);
+    }
+
     @PreAuthorize("hasRole('ADMIN')")
     @PostMapping("/{id}/approve")
     public PartnerDto approve(@PathVariable UUID id) {

@@ -18,18 +18,15 @@ public class UserService {
     private static final Logger log = LoggerFactory.getLogger(UserService.class);
 
     private final UserRepository userRepository;
-    private final PushTokenRepository pushTokenRepository;
     private final PasswordResetTokenRepository passwordResetTokenRepository;
     private final SessionRevocationService sessionRevocationService;
     private final ObjectProvider<PartnerRepository> partnerRepositoryProvider;
 
     public UserService(UserRepository userRepository,
-                       PushTokenRepository pushTokenRepository,
                        PasswordResetTokenRepository passwordResetTokenRepository,
                        SessionRevocationService sessionRevocationService,
                        ObjectProvider<PartnerRepository> partnerRepositoryProvider) {
         this.userRepository = userRepository;
-        this.pushTokenRepository = pushTokenRepository;
         this.passwordResetTokenRepository = passwordResetTokenRepository;
         this.sessionRevocationService = sessionRevocationService;
         this.partnerRepositoryProvider = partnerRepositoryProvider;
@@ -50,13 +47,12 @@ public class UserService {
         // 1. Revoke all active sessions
         sessionRevocationService.revokeAllUserSessions(user.getEmail());
 
-        // 2. Purge push tokens and password reset tokens
-        pushTokenRepository.deleteAllByUserId(userId);
+        // 2. Purge password reset tokens
         passwordResetTokenRepository.deleteAllByUserId(userId);
 
         // 3. Soft-delete user entity (anonymizes name, email, phone, address, and sets sentinel password hash)
         user.softDelete();
-        userRepository.save(user);
+        userRepository.saveAndFlush(user);
 
         // 4. Anonymize partner profile fields if user was an organization partner
         partnerRepositoryProvider.ifAvailable(partnerRepo -> {

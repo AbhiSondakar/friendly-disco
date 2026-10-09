@@ -17,7 +17,10 @@ public record PartnerDto(
     BigDecimal rating,
     int capacity,
     Instant createdAt,
-    Instant updatedAt) {
+    Instant updatedAt,
+    String facilityAddress,
+    Double facilityLat,
+    Double facilityLon) {
 
     public static PartnerDto from(Partner p, boolean includeSensitive) {
         return new PartnerDto(
@@ -33,7 +36,10 @@ public record PartnerDto(
             p.getRating(),
             p.getCapacity(),
             p.getCreatedAt(),
-            p.getUpdatedAt()
+            p.getUpdatedAt(),
+            p.getFacilityAddress(),
+            p.getFacilityLat(),
+            p.getFacilityLon()
         );
     }
 }

@@ -11,15 +11,7 @@ public final class NotificationTemplates {
 
     public static Rendered render(NotificationType type, Map<String, Object> params) {
         return switch (type) {
-            case OFFER_RECEIVED -> new Rendered(
-                "New pickup offer available",
-                "You have a new pickup offer for a device. Open the app to accept it before it expires."
-            );
-            case OFFER_SUPERSEDED -> new Rendered(
-                "Offer no longer available",
-                "A pickup offer you received was accepted by another partner and has been withdrawn."
-            );
-            case PICKUP_ACCEPTED -> new Rendered(
+                        case PICKUP_ACCEPTED -> new Rendered(
                 "Pickup accepted",
                 "A partner has accepted your pickup request and will be in touch shortly."
             );
@@ -43,15 +35,7 @@ public final class NotificationTemplates {
                 "Pickup reassigned",
                 "Your pickup has been reassigned to a different partner."
             );
-            case PICKUP_ROUTING_ESCALATED -> new Rendered(
-                "Pickup Routing Escalated",
-                "A pickup has been escalated to the admin queue."
-            );
-            case PICKUP_ROUTING_DELAYED -> new Rendered(
-                "Pickup Routing Update",
-                "We are searching for an available partner for your pickup request."
-            );
-            case PARTNER_APPROVED -> new Rendered(
+                        case PARTNER_APPROVED -> new Rendered(
                 "Partner account approved",
                 "Great news — your partner application has been approved. You can now accept pickup offers."
             );
@@ -78,3 +62,4 @@ public final class NotificationTemplates {
         return s.length() <= 8 ? s : s.substring(0, 8);
     }
 }
+

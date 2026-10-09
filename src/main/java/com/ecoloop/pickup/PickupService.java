@@ -11,8 +11,6 @@ import com.ecoloop.partner.Partner;
 import com.ecoloop.partner.PartnerRepository;
 import com.ecoloop.rewards.RewardLedger;
 import com.ecoloop.rewards.RewardLedgerRepository;
-import com.ecoloop.routing.RoutingOffer;
-import com.ecoloop.routing.RoutingOfferRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -47,8 +45,7 @@ public class PickupService {
     private final DeviceRepository devices;
     private final FileStorageService fileStorageService;
     private final ClassificationApi classificationApi;
-    private final RoutingOfferRepository offers;
-    private final TransactionTemplate transactionTemplate;
+        private final TransactionTemplate transactionTemplate;
 
     public PickupService(PickupRepository pickups,
                          PartnerRepository partners,
@@ -58,7 +55,6 @@ public class PickupService {
                          DeviceRepository devices,
                          FileStorageService fileStorageService,
                          ClassificationApi classificationApi,
-                         RoutingOfferRepository offers,
                          PlatformTransactionManager transactionManager) {
         this.pickups = pickups;
         this.partners = partners;
@@ -68,7 +64,6 @@ public class PickupService {
         this.devices = devices;
         this.fileStorageService = fileStorageService;
         this.classificationApi = classificationApi;
-        this.offers = offers;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
@@ -108,7 +103,9 @@ public class PickupService {
                                                   MultipartFile image,
                                                   String condition,
                                                   String address,
-                                                  Instant scheduledAt) throws IOException {
+                                                  Instant scheduledAt,
+                                                  Double pickupLat,
+                                                  Double pickupLon) throws IOException {
         if (actor == null || (!actor.isHousehold() && !actor.isAdmin())) {
             throw new AccessDeniedException("Only households can submit pickups");
         }
@@ -151,6 +148,8 @@ public class PickupService {
             device = devices.save(device);
 
             PickupRequest pickup = new PickupRequest(userId, device.getId(), address != null ? address.trim() : "");
+            pickup.setPickupLat(pickupLat);
+            pickup.setPickupLon(pickupLon);
             if (scheduledAt != null) {
                 pickup.setScheduledAt(scheduledAt);
             }
@@ -182,72 +181,6 @@ public class PickupService {
         PickupRequest pickup = pickups.findActiveByUserIdAndDeviceId(actor.userId(), deviceId)
             .orElseThrow(() -> new NoSuchElementException("No active pickup found for this device"));
         pickup.cancelBy(actor);
-        return pickups.save(pickup);
-    }
-
-    @Transactional(timeout = 5)
-    public PickupRequest acceptOfferedPickup(ActorContext actor, UUID pickupId, UUID offerId) {
-        if (actor == null || !actor.isPartner()) {
-            throw new AccessDeniedException("Only approved partners can accept pickups");
-        }
-        if (offerId == null) {
-            throw new AccessDeniedException("Offer ID is required to accept pickup");
-        }
-
-        Partner partner = requirePartner(actor.userId());
-
-        // Lock the contested pickup before a partner's individual offer.  That way a
-        // competing acceptor cannot hold a losing offer while the winner's routing
-        // event supersedes it, which otherwise creates a lock cycle.
-        PickupRequest pickup = pickups.findByIdForUpdate(pickupId)
-            .orElseThrow(() -> new NoSuchElementException("Pickup not found"));
-
-        Partner lockedPartner = partners.findByIdForUpdate(partner.getId())
-            .orElseThrow(() -> new AccessDeniedException("Partner profile not found during lock acquisition"));
-        if (!"approved".equalsIgnoreCase(lockedPartner.getStatus())) {
-            throw new AccessDeniedException("Partner is not approved");
-        }
-
-        RoutingOffer offer = offers.findByIdAndPartnerIdForUpdate(offerId, lockedPartner.getId())
-            .orElseThrow(() -> new AccessDeniedException("Offer not found"));
-
-        if (!pickupId.equals(offer.getPickupId())) {
-            throw new IllegalStateException("Offer is not for this pickup");
-        }
-
-        if (offer.getExpiresAt() != null && offer.getExpiresAt().isBefore(Instant.now())) {
-            offer.setStatus("expired");
-            offers.save(offer);
-            throw new IllegalStateException("Offer has expired");
-        }
-
-        if (!"offered".equalsIgnoreCase(offer.getStatus())) {
-            throw new IllegalStateException("Offer is no longer available (current status: " + offer.getStatus() + ")");
-        }
-
-        long activeJobs = pickups.countActiveJobsByPartnerId(lockedPartner.getId());
-        if (activeJobs >= lockedPartner.getCapacity()) {
-            throw new IllegalStateException("Partner has reached maximum active capacity");
-        }
-
-        pickup.acceptBy(actor.withPartnerId(lockedPartner.getId()), offer);
-
-        offer.setStatus("accepted");
-        offers.save(offer);
-
-        return pickups.save(pickup);
-    }
-
-    @Transactional
-    public PickupRequest rejectAssignedPickup(ActorContext actor, UUID pickupId, String reason) {
-        if (actor == null || !actor.isPartner()) {
-            throw new AccessDeniedException("Only assigned partner can reject pickup");
-        }
-        Partner partner = requirePartner(actor.userId());
-        PickupRequest pickup = pickups.findByIdForUpdate(pickupId)
-            .orElseThrow(() -> new NoSuchElementException("Pickup not found"));
-
-        pickup.rejectBy(actor.withPartnerId(partner.getId()), reason);
         return pickups.save(pickup);
     }
 
@@ -362,3 +295,4 @@ public class PickupService {
         return pickupList.stream().map(this::enrich).toList();
     }
 }
+

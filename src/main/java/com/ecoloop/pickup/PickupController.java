@@ -18,6 +18,7 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/pickups")
+@PreAuthorize("hasRole('HOUSEHOLD')")
 public class PickupController {
     private static final Logger log = LoggerFactory.getLogger(PickupController.class);
 
@@ -35,8 +36,10 @@ public class PickupController {
         @RequestParam(defaultValue = "good") String condition,
         @RequestParam @NotBlank String address,
         @RequestParam(required = false) Instant scheduledAt,
+        @RequestParam(required = false) Double pickupLat,
+        @RequestParam(required = false) Double pickupLon,
         ActorContext actor) throws IOException {
-        return pickupService.submitHouseholdPickup(actor, image, condition, address, scheduledAt);
+        return pickupService.submitHouseholdPickup(actor, image, condition, address, scheduledAt, pickupLat, pickupLon);
     }
 
     @PostMapping
@@ -56,32 +59,6 @@ public class PickupController {
         PickupRequest pickup = pickups.findByIdAndUserId(id, actor.userId())
             .orElseThrow(() -> new NoSuchElementException("Pickup not found"));
         return pickupService.enrich(pickup);
-    }
-
-    @PostMapping("/{id}/accept")
-    @PreAuthorize("hasRole('PARTNER')")
-    public PickupWithDevice accept(@PathVariable UUID id,
-                                   @Valid @RequestBody AcceptRequest body,
-                                   ActorContext actor) {
-        PickupRequest result = pickupService.acceptOfferedPickup(actor, id, body.offerId());
-        log.info("Pickup accepted: id={} by partner={} offer={}", id, actor.userId(), body.offerId());
-        return pickupService.enrich(result);
-    }
-
-    @PostMapping("/{id}/complete")
-    @PreAuthorize("hasRole('PARTNER')")
-    public PickupWithDevice complete(@PathVariable UUID id, ActorContext actor) {
-        PickupRequest result = pickupService.completeAssignedPickup(actor, id);
-        log.info("Pickup completed: id={} by partner={}", id, actor.userId());
-        return pickupService.enrich(result);
-    }
-
-    @PostMapping("/{id}/reject")
-    @PreAuthorize("hasRole('PARTNER')")
-    public PickupWithDevice reject(@PathVariable UUID id, ActorContext actor) {
-        PickupRequest result = pickupService.rejectAssignedPickup(actor, id, null);
-        log.info("Pickup rejected: id={} by partner={}", id, actor.userId());
-        return pickupService.enrich(result);
     }
 
     @PostMapping("/{id}/cancel")

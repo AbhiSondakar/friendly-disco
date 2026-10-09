@@ -55,7 +55,7 @@ public class AdminPickupController {
   public List<PickupWithDevice> escalated() {
     // Pickups that auto-routing could not place: pending, unassigned, no live offers.
     // Admins assign a partner manually from this queue via the reassign endpoint.
-    return pickupService.enrich(pickups.findUnassignedWithoutActiveOffers(Instant.now()));
+    return pickupService.enrich(pickups.findUnassigned());
   }
 
   public record ReassignRequest(

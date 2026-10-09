@@ -15,6 +15,8 @@ public record PickupWithDevice(
     UUID partnerId,
     String status,
     String address,
+    Double pickupLat,
+    Double pickupLon,
     Instant scheduledAt,
     Instant completedAt,
     Instant createdAt,
@@ -41,6 +43,7 @@ public record PickupWithDevice(
             return new PickupWithDevice(
                 pickup.getId(), pickup.getUserId(), pickup.getDeviceId(),
                 pickup.getPartnerId(), pickup.getStatus(), pickup.getAddress(),
+                pickup.getPickupLat(), pickup.getPickupLon(),
                 pickup.getScheduledAt(), pickup.getCompletedAt(),
                 pickup.getCreatedAt(), pickup.getUpdatedAt(),
                 pickup.getVerifiedCategory(), pickup.getVerifiedCondition(), pickup.getVerificationNotes(), pickup.getVerifiedAt(), pickup.getVerifiedBy(),
@@ -51,6 +54,7 @@ public record PickupWithDevice(
         return new PickupWithDevice(
             pickup.getId(), pickup.getUserId(), pickup.getDeviceId(),
             pickup.getPartnerId(), pickup.getStatus(), pickup.getAddress(),
+            pickup.getPickupLat(), pickup.getPickupLon(),
             pickup.getScheduledAt(), pickup.getCompletedAt(),
             pickup.getCreatedAt(), pickup.getUpdatedAt(),
             pickup.getVerifiedCategory(), pickup.getVerifiedCondition(), pickup.getVerificationNotes(), pickup.getVerifiedAt(), pickup.getVerifiedBy(),

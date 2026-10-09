@@ -22,8 +22,11 @@ import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.UUID;
 
+import org.springframework.security.access.prepost.PreAuthorize;
+
 @RestController
 @RequestMapping("/api/devices")
+@PreAuthorize("hasRole('HOUSEHOLD')")
 public class DeviceController {
     private static final Logger log = LoggerFactory.getLogger(DeviceController.class);
 

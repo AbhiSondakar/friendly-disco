@@ -1,0 +1,14 @@
+ALTER TABLE pickup_requests
+    ADD COLUMN IF NOT EXISTS pickup_lat DOUBLE PRECISION;
+
+ALTER TABLE pickup_requests
+    ADD COLUMN IF NOT EXISTS pickup_lon DOUBLE PRECISION;
+
+ALTER TABLE partners
+    ADD COLUMN IF NOT EXISTS facility_address TEXT;
+
+ALTER TABLE partners
+    ADD COLUMN IF NOT EXISTS facility_lat DOUBLE PRECISION;
+
+ALTER TABLE partners
+    ADD COLUMN IF NOT EXISTS facility_lon DOUBLE PRECISION;

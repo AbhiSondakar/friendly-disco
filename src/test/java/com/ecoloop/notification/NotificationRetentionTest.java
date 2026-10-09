@@ -63,7 +63,7 @@ class NotificationRetentionTest {
         n1.setCreatedAt(Instant.now().minus(180, ChronoUnit.DAYS));
         notifications.saveAndFlush(n1);
 
-        Notification n2 = new Notification(userId2, NotificationType.OFFER_RECEIVED, "t", "b", UUID.randomUUID());
+        Notification n2 = new Notification(userId2, NotificationType.PICKUP_ACCEPTED, "t", "b", UUID.randomUUID());
         n2.setRead(true);
         n2.setCreatedAt(Instant.now().minus(365, ChronoUnit.DAYS));
         notifications.saveAndFlush(n2);

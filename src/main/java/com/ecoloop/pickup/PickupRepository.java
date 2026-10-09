@@ -44,8 +44,6 @@ public interface PickupRepository extends JpaRepository<PickupRequest,UUID>, Jpa
      * Covers "no eligible partners" escalations, all-offers-expired/rejected pickups, and
      * legacy pickups stranded before routing fixes — anything that needs a manual assignment.
      */
-    @Query("SELECT p FROM PickupRequest p WHERE p.status = 'pending' AND p.partnerId IS NULL "
-        + "AND NOT EXISTS (SELECT o FROM RoutingOffer o WHERE o.pickupId = p.id AND o.status = 'offered' "
-        + "AND (o.expiresAt IS NULL OR o.expiresAt > :now)) ORDER BY p.createdAt ASC")
-    List<PickupRequest> findUnassignedWithoutActiveOffers(@Param("now") Instant now);
+    @Query("SELECT p FROM PickupRequest p WHERE p.status = 'pending' AND p.partnerId IS NULL ORDER BY p.createdAt ASC")
+    List<PickupRequest> findUnassigned();
 }

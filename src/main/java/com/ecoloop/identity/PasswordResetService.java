@@ -36,7 +36,7 @@ public class PasswordResetService {
     @Value("${ecoloop.mail.from:noreply@ecoloop.local}")
     private String mailFrom;
 
-    @Value("${ecoloop.mail.reset-base-url:http://localhost:5173/reset-password}")
+    @Value("${ecoloop.mail.reset-base-url:ecoloop://reset-password}")
     private String resetBaseUrl;
 
     public PasswordResetService(UserRepository users,

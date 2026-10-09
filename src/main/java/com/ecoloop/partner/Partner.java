@@ -30,6 +30,15 @@ public class Partner {
     @Column(name = "service_areas", columnDefinition = "TEXT")
     private String serviceAreas;
 
+    @Column(name = "facility_address", columnDefinition = "TEXT")
+    private String facilityAddress;
+
+    @Column(name = "facility_lat")
+    private Double facilityLat;
+
+    @Column(name = "facility_lon")
+    private Double facilityLon;
+
     @Column(name = "capabilities", columnDefinition = "TEXT")
     private String capabilities;
 
@@ -73,6 +82,12 @@ public class Partner {
     public void setLicenseUploadId(UUID licenseUploadId) { this.licenseUploadId = licenseUploadId; }
     public String getServiceAreas() { return serviceAreas; }
     public void setServiceAreas(String serviceAreas) { this.serviceAreas = serviceAreas; }
+    public String getFacilityAddress() { return facilityAddress; }
+    public void setFacilityAddress(String facilityAddress) { this.facilityAddress = facilityAddress; }
+    public Double getFacilityLat() { return facilityLat; }
+    public void setFacilityLat(Double facilityLat) { this.facilityLat = facilityLat; }
+    public Double getFacilityLon() { return facilityLon; }
+    public void setFacilityLon(Double facilityLon) { this.facilityLon = facilityLon; }
     public String getCapabilities() { return capabilities; }
     public void setCapabilities(String capabilities) { this.capabilities = capabilities; }
     public int getCapacity() { return capacity; }
