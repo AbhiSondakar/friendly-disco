@@ -19,7 +19,7 @@ class PickupRequestTest {
         
         req.assignTo(actor, partnerId);
         
-        assertEquals("assigned", req.getStatus());
+        assertEquals("accepted", req.getStatus());
         assertEquals(partnerId, req.getPartnerId());
         assertNotNull(req.getAssignedAt());
     }
@@ -33,7 +33,7 @@ class PickupRequestTest {
         req.assignTo(actor, partnerId);
         req.startTransitBy(actor);
         
-        assertEquals("in_transit", req.getStatus());
+        assertEquals("accepted", req.getStatus());
         assertNotNull(req.getInTransitAt());
     }
 
@@ -47,7 +47,7 @@ class PickupRequestTest {
         req.startTransitBy(actor);
         req.markCollectedBy(actor);
         
-        assertEquals("collected", req.getStatus());
+        assertEquals("accepted", req.getStatus());
         assertNotNull(req.getCollectedAt());
     }
 
@@ -62,7 +62,7 @@ class PickupRequestTest {
         req.markCollectedBy(actor);
         req.deliverBy(actor, "WH-1", "WH-1");
         
-        assertEquals("delivered", req.getStatus());
+        assertEquals("completed", req.getStatus());
         assertNotNull(req.getDeliveredAt());
     }
 }

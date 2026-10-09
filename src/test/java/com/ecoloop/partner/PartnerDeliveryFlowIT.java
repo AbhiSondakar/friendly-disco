@@ -58,7 +58,7 @@ class PartnerDeliveryFlowIT {
 
         // 3. PENDING → ASSIGNED
         PickupRequest assigned = pickupService.claimPickup(actor, pickup.getId());
-        assertEquals("assigned", assigned.getStatus());
+        assertEquals("accepted", assigned.getStatus());
         assertEquals(partner.getId(), assigned.getPartnerId());
         assertNotNull(assigned.getAssignedAt());
 
@@ -69,17 +69,17 @@ class PartnerDeliveryFlowIT {
 
         // 5. ASSIGNED → IN_TRANSIT
         PickupRequest inTransit = pickupService.startTransit(actor, pickup.getId());
-        assertEquals("in_transit", inTransit.getStatus());
+        assertEquals("accepted", inTransit.getStatus());
         assertNotNull(inTransit.getInTransitAt());
 
         // 6. IN_TRANSIT → COLLECTED
         PickupRequest collected = pickupService.markCollected(actor, pickup.getId());
-        assertEquals("collected", collected.getStatus());
+        assertEquals("accepted", collected.getStatus());
         assertNotNull(collected.getCollectedAt());
 
         // 7. COLLECTED → DELIVERED (correct warehouse ID)
         PickupRequest delivered = pickupService.deliverPickup(actor, pickup.getId(), "WH-FLOW-001");
-        assertEquals("delivered", delivered.getStatus());
+        assertEquals("completed", delivered.getStatus());
         assertNotNull(delivered.getDeliveredAt());
         assertNotNull(delivered.getCompletedAt());
 

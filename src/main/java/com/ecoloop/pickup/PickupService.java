@@ -206,7 +206,7 @@ public class PickupService {
         PickupRequest pickup = pickups.findByIdForUpdate(pickupId)
             .orElseThrow(() -> new NoSuchElementException("Pickup not found"));
 
-        boolean alreadyCompleted = "completed".equals(pickup.getStatus()) || "delivered".equals(pickup.getStatus());
+        boolean alreadyCompleted = "completed".equals(pickup.getStatus());
         pickup.completeBy(actor.withPartnerId(partner.getId()));
         PickupRequest saved = pickups.save(pickup);
 

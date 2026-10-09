@@ -148,7 +148,7 @@ public class PickupRequest extends AbstractAggregateRoot<PickupRequest> {
         if (!actor.isAdmin() && !actor.userId().equals(this.userId)) {
             throw new AccessDeniedException("Pickup does not belong to this user");
         }
-        if (!Set.of("pending", "accepted", "assigned").contains(this.status)) {
+        if (!Set.of("pending", "accepted").contains(this.status)) {
             throw new IllegalStateException("Invalid pickup state transition");
         }
 
@@ -169,7 +169,7 @@ public class PickupRequest extends AbstractAggregateRoot<PickupRequest> {
         if (!"pending".equals(this.status) || this.partnerId != null)
             throw new IllegalStateException("Pickup is not available for claiming");
         this.partnerId = partnerId;
-        this.status = "assigned";
+        this.status = "accepted";
         this.assignedAt = Instant.now();
         this.updatedAt = Instant.now();
         return this;
@@ -177,9 +177,9 @@ public class PickupRequest extends AbstractAggregateRoot<PickupRequest> {
 
     public PickupRequest startTransitBy(ActorContext actor) {
         requireAssignedPartner(actor);
-        if (!"assigned".equals(this.status))
+        if (this.assignedAt == null || this.inTransitAt != null)
             throw new IllegalStateException("Pickup must be assigned before starting transit");
-        this.status = "in_transit";
+        this.status = "accepted";
         this.inTransitAt = Instant.now();
         this.updatedAt = Instant.now();
         return this;
@@ -187,9 +187,9 @@ public class PickupRequest extends AbstractAggregateRoot<PickupRequest> {
 
     public PickupRequest markCollectedBy(ActorContext actor) {
         requireAssignedPartner(actor);
-        if (!"in_transit".equals(this.status))
+        if (this.inTransitAt == null || this.collectedAt != null)
             throw new IllegalStateException("Pickup must be in transit before marking collected");
-        this.status = "collected";
+        this.status = "accepted";
         this.collectedAt = Instant.now();
         this.updatedAt = Instant.now();
         return this;
@@ -197,11 +197,11 @@ public class PickupRequest extends AbstractAggregateRoot<PickupRequest> {
 
     public PickupRequest deliverBy(ActorContext actor, String warehouseId, String expectedWarehouseId) {
         requireAssignedPartner(actor);
-        if (!"collected".equals(this.status))
+        if (this.collectedAt == null || this.deliveredAt != null)
             throw new IllegalStateException("Pickup must be collected before delivery");
         if (expectedWarehouseId != null && !expectedWarehouseId.equals(warehouseId))
             throw new IllegalStateException("Warehouse ID does not match partner's registered warehouse");
-        this.status = "delivered";
+        this.status = "completed";
         this.deliveredAt = Instant.now();
         this.completedAt = Instant.now();
         this.updatedAt = Instant.now();
@@ -240,7 +240,7 @@ public class PickupRequest extends AbstractAggregateRoot<PickupRequest> {
         if ("completed".equals(this.status)) {
             return this;
         }
-        if (!Set.of("accepted", "verified", "delivered").contains(this.status)) {
+        if (!Set.of("accepted", "verified").contains(this.status)) {
             throw new IllegalStateException("Pickup cannot be completed from status: " + this.status);
         }
 
@@ -278,7 +278,7 @@ public class PickupRequest extends AbstractAggregateRoot<PickupRequest> {
         if (!suspendedPartnerId.equals(this.partnerId)) {
             throw new IllegalArgumentException("Pickup is not assigned to the suspended partner");
         }
-        if (!Set.of("accepted", "assigned", "in_transit", "collected", "verified").contains(this.status)) {
+        if (!Set.of("accepted", "verified").contains(this.status)) {
             return false;
         }
 

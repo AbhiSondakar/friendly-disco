@@ -207,7 +207,7 @@ public class PartnerController {
 
         long activeJobs = pickups.countActiveJobsByPartnerId(partnerId);
         long monthlyCompletions = pickups.findAllByPartnerId(partnerId).stream()
-            .filter(p -> ("completed".equals(p.getStatus()) || "delivered".equals(p.getStatus())))
+            .filter(p -> "completed".equals(p.getStatus()))
             .filter(p -> p.getCompletedAt() != null && p.getCompletedAt().isAfter(monthStart))
             .filter(p -> users.findById(p.getUserId()).map(u -> !u.isDeleted()).orElse(false))
             .count();

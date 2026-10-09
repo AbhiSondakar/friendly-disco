@@ -37,7 +37,7 @@ class PickupServiceIT {
         ActorContext actor = new ActorContext(pU.getId(), Role.PARTNER, p.getId());
         PickupRequest result = pickupService.claimPickup(actor, req.getId());
         
-        assertEquals("assigned", result.getStatus());
+        assertEquals("accepted", result.getStatus());
         assertEquals(p.getId(), result.getPartnerId());
     }
 
@@ -54,7 +54,7 @@ class PickupServiceIT {
         pickupService.claimPickup(actor, req.getId());
         
         PickupRequest result = pickupService.startTransit(actor, req.getId());
-        assertEquals("in_transit", result.getStatus());
+        assertEquals("accepted", result.getStatus());
     }
 
     @Test
@@ -71,7 +71,7 @@ class PickupServiceIT {
         pickupService.startTransit(actor, req.getId());
         
         PickupRequest result = pickupService.markCollected(actor, req.getId());
-        assertEquals("collected", result.getStatus());
+        assertEquals("accepted", result.getStatus());
     }
 
     @Test
@@ -90,7 +90,7 @@ class PickupServiceIT {
         pickupService.markCollected(actor, req.getId());
         
         PickupRequest result = pickupService.deliverPickup(actor, req.getId(), "WH-1");
-        assertEquals("delivered", result.getStatus());
+        assertEquals("completed", result.getStatus());
     }
 
     @Test
